@@ -1,10 +1,11 @@
+import os
+from pathlib import Path
+from shutil import copy
+
 import cv2 as cv
 import numpy as np
-import time
-import random
-import sys
-import os
-from shutil import copy
+
+from asu.core.common.paths import maps_dir, maps_path, project_path
 
 
 def get_center(img, i, j):
@@ -50,10 +51,11 @@ def get_target(pth):
 
 
 # 删除地图数据中没用的文件
-for file in os.listdir("imgs/maps"):
-    pth = "imgs/maps/" + file + "/target.jpg"
+for file in os.listdir(maps_dir()):
+    pth = maps_path(file, "target.jpg")
     if os.path.exists(pth):
         get_target(pth)
-        copy(os.getcwd() + "\\" + "imgs/maps/" + file + "/target.jpg", os.getcwd() + "\\" + "targ")
-        os.rename("targ/target.jpg", "targ/" + str(file) + ".jpg")
-
+        targ_dir = Path(project_path("targ"))
+        targ_dir.mkdir(parents=True, exist_ok=True)
+        copy(pth, str(targ_dir))
+        os.rename(str(targ_dir / "target.jpg"), str(targ_dir / f"{file}.jpg"))

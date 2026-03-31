@@ -1,36 +1,48 @@
-import numpy as np
-import cv2
 import argparse
 import math
+
+import cv2
+import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-import os
+
+from asu.core.common.paths import models_path
 from asu.core.diver.config import config
-abspath = os.path.dirname(os.path.dirname(os.path.dirname(__file__))) + '/'
+
 
 def get_rotate_crop_image(img, points):
     """根据四点框透视裁剪文本区域。"""
     assert len(points) == 4, "shape of points must be 4*2"
     img_crop_width = int(
         max(
-            np.linalg.norm(points[0] - points[1]),
-            np.linalg.norm(points[2] - points[3])))
+            np.linalg.norm(points[0] - points[1]), np.linalg.norm(points[2] - points[3])
+        )
+    )
     img_crop_height = int(
         max(
-            np.linalg.norm(points[0] - points[3]),
-            np.linalg.norm(points[1] - points[2])))
-    pts_std = np.float32([[0, 0], [img_crop_width, 0],
-                          [img_crop_width, img_crop_height],
-                          [0, img_crop_height]])
+            np.linalg.norm(points[0] - points[3]), np.linalg.norm(points[1] - points[2])
+        )
+    )
+    pts_std = np.float32(
+        [
+            [0, 0],
+            [img_crop_width, 0],
+            [img_crop_width, img_crop_height],
+            [0, img_crop_height],
+        ]
+    )
     M = cv2.getPerspectiveTransform(points, pts_std)
     dst_img = cv2.warpPerspective(
         img,
-        M, (img_crop_width, img_crop_height),
+        M,
+        (img_crop_width, img_crop_height),
         borderMode=cv2.BORDER_REPLICATE,
-        flags=cv2.INTER_CUBIC)
+        flags=cv2.INTER_CUBIC,
+    )
     dst_img_height, dst_img_width = dst_img.shape[0:2]
     if dst_img_height * 1.0 / dst_img_width >= 1.5:
         dst_img = np.rot90(dst_img)
     return dst_img
+
 
 def get_minarea_rect_crop(img, points):
     bounding_box = cv2.minAreaRect(np.array(points).astype(np.int32))
@@ -64,12 +76,14 @@ def resize_img(img, input_size=600):
     img = cv2.resize(img, None, None, fx=im_scale, fy=im_scale)
     return img
 
+
 def str_count(s):
     """
     统计字符串等效长度。
     中文按 1 计数，字母/数字/空格按 0.5 计数。
     """
     import string
+
     count_zh = count_pu = 0
     s_len = len(str(s))
     en_dg_count = 0
@@ -82,22 +96,26 @@ def str_count(s):
             count_pu += 1
     return s_len - math.ceil(en_dg_count / 2)
 
-def text_visual(texts,
-                scores,
-                img_h=400,
-                img_w=600,
-                threshold=0.,
-                font_path="./onnx/fonts/simfang.ttf"):
+
+def text_visual(
+    texts,
+    scores,
+    img_h=400,
+    img_w=600,
+    threshold=0.0,
+    font_path="./onnx/fonts/simfang.ttf",
+):
     """
     创建空白画布并绘制识别文本与分数。
     """
     if scores is not None:
-        assert len(texts) == len(
-            scores), "The number of txts and corresponding scores must match"
+        assert len(texts) == len(scores), (
+            "The number of txts and corresponding scores must match"
+        )
 
     def create_blank_img():
         blank_img = np.ones(shape=[img_h, img_w], dtype=np.int8) * 255
-        blank_img[:, img_w - 1:] = 0
+        blank_img[:, img_w - 1 :] = 0
         blank_img = Image.fromarray(blank_img).convert("RGB")
         draw_txt = ImageDraw.Draw(blank_img)
         return blank_img, draw_txt
@@ -119,23 +137,23 @@ def text_visual(texts,
         first_line = True
         while str_count(txt) >= img_w // font_size - 4:
             tmp = txt
-            txt = tmp[:img_w // font_size - 4]
+            txt = tmp[: img_w // font_size - 4]
             if first_line:
-                new_txt = str(index) + ': ' + txt
+                new_txt = str(index) + ": " + txt
                 first_line = False
             else:
-                new_txt = '    ' + txt
+                new_txt = "    " + txt
             draw_txt.text((0, gap * count), new_txt, txt_color, font=font)
-            txt = tmp[img_w // font_size - 4:]
+            txt = tmp[img_w // font_size - 4 :]
             if count >= img_h // gap - 1:
                 txt_img_list.append(np.array(blank_img))
                 blank_img, draw_txt = create_blank_img()
                 count = 0
             count += 1
         if first_line:
-            new_txt = str(index) + ': ' + txt + '   ' + '%.3f' % (scores[idx])
+            new_txt = str(index) + ": " + txt + "   " + "%.3f" % (scores[idx])
         else:
-            new_txt = "  " + txt + "  " + '%.3f' % (scores[idx])
+            new_txt = "  " + txt + "  " + "%.3f" % (scores[idx])
         draw_txt.text((0, gap * count), new_txt, txt_color, font=font)
         # 判断是否需要新建一页画布
         if count >= img_h // gap - 1 and idx + 1 < len(texts):
@@ -150,12 +168,15 @@ def text_visual(texts,
         blank_img = np.concatenate(txt_img_list, axis=1)
     return np.array(blank_img)
 
-def draw_ocr(image,
-             boxes,
-             txts=None,
-             scores=None,
-             drop_score=0.5,
-             font_path="./onnxocr/fonts/simfang.ttf"):
+
+def draw_ocr(
+    image,
+    boxes,
+    txts=None,
+    scores=None,
+    drop_score=0.5,
+    font_path="./onnxocr/fonts/simfang.ttf",
+):
     """
     将检测框与识别文本可视化到图像上。
     """
@@ -163,8 +184,7 @@ def draw_ocr(image,
         scores = [1] * len(boxes)
     box_num = len(boxes)
     for i in range(box_num):
-        if scores is not None and (scores[i] < drop_score or
-                                   math.isnan(scores[i])):
+        if scores is not None and (scores[i] < drop_score or math.isnan(scores[i])):
             continue
         box = np.reshape(np.array(boxes[i]), [-1, 1, 2]).astype(np.int64)
         image = cv2.polylines(np.array(image), [box], True, (255, 0, 0), 2)
@@ -176,20 +196,25 @@ def draw_ocr(image,
             img_h=img.shape[0],
             img_w=600,
             threshold=drop_score,
-            font_path=font_path)
+            font_path=font_path,
+        )
         img = np.concatenate([np.array(img), np.array(txt_img)], axis=1)
         return img
     return image
 
+
 def base64_to_cv2(b64str):
     import base64
-    data = base64.b64decode(b64str.encode('utf8'))
+
+    data = base64.b64decode(b64str.encode("utf8"))
     data = np.frombuffer(data, np.uint8)
     data = cv2.imdecode(data, cv2.IMREAD_COLOR)
     return data
 
+
 def str2bool(v):
     return v.lower() in ("true", "t", "1")
+
 
 def infer_args():
     parser = argparse.ArgumentParser()
@@ -207,11 +232,11 @@ def infer_args():
     # 文本检测参数
     parser.add_argument("--image_dir", type=str)
     parser.add_argument("--page_num", type=int, default=0)
-    parser.add_argument("--det_algorithm", type=str, default='DB')
-    parser.add_argument("--det_model_dir", type=str, default=abspath + 'asu/assets/models/v3_det.onnx')
+    parser.add_argument("--det_algorithm", type=str, default="DB")
+    parser.add_argument("--det_model_dir", type=str, default=models_path("v3_det.onnx"))
     parser.add_argument("--det_limit_side_len", type=float, default=config.accuracy)
-    parser.add_argument("--det_limit_type", type=str, default='max')
-    parser.add_argument("--det_box_type", type=str, default='quad')
+    parser.add_argument("--det_limit_type", type=str, default="max")
+    parser.add_argument("--det_box_type", type=str, default="quad")
 
     # 差分二值化检测参数
     parser.add_argument("--det_db_thresh", type=float, default=0.3)
@@ -243,39 +268,42 @@ def infer_args():
     parser.add_argument("--fourier_degree", type=int, default=5)
 
     # 文本识别参数
-    parser.add_argument("--rec_algorithm", type=str, default='SVTR_LCNet')
-    parser.add_argument("--rec_model_dir", type=str, default=abspath + 'asu/assets/models/v4_rec.onnx')
+    parser.add_argument("--rec_algorithm", type=str, default="SVTR_LCNet")
+    parser.add_argument("--rec_model_dir", type=str, default=models_path("v4_rec.onnx"))
     parser.add_argument("--rec_image_inverse", type=str2bool, default=True)
     parser.add_argument("--rec_image_shape", type=str, default="3, 48, 320")
     parser.add_argument("--rec_batch_num", type=int, default=6)
     parser.add_argument("--max_text_length", type=int, default=25)
     parser.add_argument(
-        "--rec_char_dict_path",
-        type=str,
-        default=abspath + 'asu/assets/models/ppocr_keys_v1.txt')
+        "--rec_char_dict_path", type=str, default=models_path("ppocr_keys_v1.txt")
+    )
     parser.add_argument("--use_space_char", type=str2bool, default=True)
     parser.add_argument(
-        "--vis_font_path", type=str, default="./onnxocr/fonts/simfang.ttf")
+        "--vis_font_path", type=str, default="./onnxocr/fonts/simfang.ttf"
+    )
     parser.add_argument("--drop_score", type=float, default=0.5)
 
     # 端到端参数
-    parser.add_argument("--e2e_algorithm", type=str, default='PGNet')
+    parser.add_argument("--e2e_algorithm", type=str, default="PGNet")
     parser.add_argument("--e2e_model_dir", type=str)
     parser.add_argument("--e2e_limit_side_len", type=float, default=768)
-    parser.add_argument("--e2e_limit_type", type=str, default='max')
+    parser.add_argument("--e2e_limit_type", type=str, default="max")
 
     # 端到端文本网络参数
     parser.add_argument("--e2e_pgnet_score_thresh", type=float, default=0.5)
     parser.add_argument(
-        "--e2e_char_dict_path", type=str, default="./onnxocr/ppocr/utils/ic15_dict.txt")
-    parser.add_argument("--e2e_pgnet_valid_set", type=str, default='totaltext')
-    parser.add_argument("--e2e_pgnet_mode", type=str, default='fast')
+        "--e2e_char_dict_path", type=str, default="./onnxocr/ppocr/utils/ic15_dict.txt"
+    )
+    parser.add_argument("--e2e_pgnet_valid_set", type=str, default="totaltext")
+    parser.add_argument("--e2e_pgnet_mode", type=str, default="fast")
 
     # 文本分类参数
     parser.add_argument("--use_angle_cls", type=str2bool, default=False)
-    parser.add_argument("--cls_model_dir", type=str, default='./onnxocr/models/ppocrv4/cls/cls.onnx')
+    parser.add_argument(
+        "--cls_model_dir", type=str, default="./onnxocr/models/ppocrv4/cls/cls.onnx"
+    )
     parser.add_argument("--cls_image_shape", type=str, default="3, 48, 192")
-    parser.add_argument("--label_list", type=list, default=['0', '180'])
+    parser.add_argument("--label_list", type=list, default=["0", "180"])
     parser.add_argument("--cls_batch_num", type=int, default=6)
     parser.add_argument("--cls_thresh", type=float, default=0.9)
 
@@ -291,7 +319,8 @@ def infer_args():
 
     #
     parser.add_argument(
-        "--draw_img_save_dir", type=str, default="./onnxocr/inference_results")
+        "--draw_img_save_dir", type=str, default="./onnxocr/inference_results"
+    )
     parser.add_argument("--save_crop_res", type=str2bool, default=False)
     parser.add_argument("--crop_res_save_dir", type=str, default="./onnxocr/output")
 
@@ -306,4 +335,3 @@ def infer_args():
     parser.add_argument("--show_log", type=str2bool, default=True)
     parser.add_argument("--use_onnx", type=str2bool, default=False)
     return parser
-

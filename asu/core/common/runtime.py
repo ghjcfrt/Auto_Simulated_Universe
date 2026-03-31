@@ -7,6 +7,7 @@ import pythoncom
 import win32com.client
 import win32gui
 
+from asu.core.common.paths import logs_path
 from asu.core.platform.log import log
 
 
@@ -27,7 +28,7 @@ def notif(title: str, msg: str, cnt=None):
     """统一写入通知文件，并返回可解析的计数值。"""
     log.info("通知：" + msg + "  " + title)
     tm = str(time.time()) if cnt is not None else None
-    file_path = os.path.join("logs", "notif.txt")
+    file_path = logs_path("notif.txt", use_cwd=True)
 
     if os.path.exists(file_path):
         file_cnt, file_tm = _read_notif_state(file_path)
@@ -36,7 +37,7 @@ def notif(title: str, msg: str, cnt=None):
         if tm is None and file_tm is not None:
             tm = file_tm
 
-    os.makedirs("logs", exist_ok=True)
+    os.makedirs(logs_path(use_cwd=True), exist_ok=True)
     if cnt is None:
         cnt = "0"
     if tm is None:
@@ -71,4 +72,3 @@ def set_forground(config):
             win32gui.SetForegroundWindow(game_nd)
     except Exception:
         return
-

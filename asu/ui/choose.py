@@ -7,6 +7,7 @@ from flet_core import CrossAxisAlignment, MainAxisAlignment
 from asu.apps.align_angle import main as align_angle
 from asu.apps.diver import DivergentUniverse, version
 from asu.apps.simul import SimulatedUniverse
+from asu.core.common.paths import img_path
 from asu.core.common.runtime import notif
 from asu.core.diver.args import args
 from asu.core.diver.config import config as config_diver
@@ -147,7 +148,7 @@ def choose_view(page: Page):
 
     def go_money(e=None):
         dlg = ft.AlertDialog(
-            title=ft.Text("送杯咖啡喵 QWQ"), content=ft.Image("imgs/money.jpg")
+            title=ft.Text("送杯咖啡喵 QWQ"), content=ft.Image(img_path("money.jpg"))
         )
         page.dialog = dlg
         dlg.open = True

@@ -17,6 +17,7 @@ import win32gui
 
 import asu.core.simul.keyops as keyops
 from asu.apps.align_angle import main as align_angle
+from asu.core.common.paths import img_path, logs_path, maps_dir, maps_path, project_path
 from asu.core.platform.log import log, set_debug
 from asu.core.simul.config import config
 from asu.core.simul.map_log import map_log
@@ -88,8 +89,8 @@ class SimulatedUniverse(UniverseUtils):
             update_map()
         self.lst_changed = time.time()
         log.info("加载地图")
-        for file in os.listdir("imgs/maps"):
-            pth = "imgs/maps/" + file + "/init.jpg"
+        for file in os.listdir(maps_dir()):
+            pth = maps_path(file, "init.jpg")
             if os.path.exists(pth):
                 image = cv.imread(pth)
                 self.img_set.append((file, self.extract_features(image)))
@@ -111,7 +112,7 @@ class SimulatedUniverse(UniverseUtils):
         self.ang_neg = 0
         self.first_mini = 1
         self.in_battle = time.time()
-        self.map_file = "imgs/maps/my_" + str(random.randint(0, 99999)) + "/"
+        self.map_file = maps_path(f"my_{random.randint(0, 99999)}") + os.sep
         if self.find == 0 and not os.path.exists(self.map_file):
             os.mkdir(self.map_file)
 
@@ -125,7 +126,7 @@ class SimulatedUniverse(UniverseUtils):
         fail_cnt = 0
         fail_time = 0
         self.confirm_time = 0
-        self._stop = os.stat("imgs/mon" + self.tss).st_size != 141882
+        self._stop = os.stat(img_path("mon" + self.tss)).st_size != 141882
         fp = 1
         while True:
             if self._stop:
@@ -411,7 +412,7 @@ class SimulatedUniverse(UniverseUtils):
                         if self.debug == 2:
                             try:
                                 with open(
-                                    "check0.txt",
+                                    project_path("check0.txt"),
                                     "r",
                                     encoding="utf-8",
                                     errors="ignore",
@@ -428,14 +429,14 @@ class SimulatedUniverse(UniverseUtils):
                                 else:
                                     pass
                                 with open(
-                                    "check0.txt",
+                                    project_path("check0.txt"),
                                     "w",
                                     encoding="utf-8",
                                 ) as fh:
                                     fh.write(str(s))
                             except:
                                 pass
-                        self.now_pth = "imgs/maps/" + self.now_map + "/"
+                        self.now_pth = maps_path(str(self.now_map)) + os.sep
                         files = self.find_latest_modified_file(self.now_pth)
                         print("地图文件：", files)
                         self.big_map = cv.imread(files, cv.IMREAD_GRAYSCALE)
@@ -757,7 +758,7 @@ class SimulatedUniverse(UniverseUtils):
         files = [
             os.path.join(folder_path, file)
             for file in os.listdir(folder_path)
-            if file.split("/")[-1][0] == "m"
+            if file and file[0] == "m"
         ]
         nx, ny = 4096, 4096
         file = ""
@@ -773,7 +774,7 @@ class SimulatedUniverse(UniverseUtils):
         return file
 
     def update_count(self, read=True):
-        file_name = "logs/notif.txt"
+        file_name = logs_path("notif.txt")
         if read:
             new_cnt = 0
             if os.path.exists(file_name):
@@ -786,7 +787,7 @@ class SimulatedUniverse(UniverseUtils):
                     except:
                         pass
             else:
-                os.makedirs("logs", exist_ok=1)
+                os.makedirs(logs_path(), exist_ok=True)
                 with open(file_name, "w", encoding="utf-8") as file:
                     file.write("0")
                     file.close()

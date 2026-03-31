@@ -1,9 +1,11 @@
-from flet_core import MainAxisAlignment, ControlEvent, CrossAxisAlignment, TextStyle
-import flet as ft
-
-from asu.ui.common import show_snack_bar, Page
-from asu.core.simul.config import config
 import os
+
+import flet as ft
+from flet_core import ControlEvent, CrossAxisAlignment, MainAxisAlignment, TextStyle
+
+from asu.core.common.paths import img_path, logs_path
+from asu.core.simul.config import config
+from asu.ui.common import Page, show_snack_bar
 
 
 def config_view(page: Page):
@@ -50,10 +52,10 @@ def config_view(page: Page):
     def get_info_mode(d):
         ls = [False, True, None]
         return ls[d]
-    
+
     def go_money(e=None):
         dlg = ft.AlertDialog(
-            title=ft.Text("送杯咖啡喵 QWQ"), content=ft.Image("imgs/money.jpg")
+            title=ft.Text("送杯咖啡喵 QWQ"), content=ft.Image(img_path("money.jpg"))
         )
         page.dialog = dlg
         dlg.open = True
@@ -67,28 +69,28 @@ def config_view(page: Page):
         except:
             pass
         nonlocal txt
-        file_name = 'logs/notif.txt'
-        cnt='0'
+        file_name = logs_path("notif.txt")
+        cnt = "0"
         if os.path.exists(file_name):
-            with open(file_name, 'w', encoding="utf-8") as file:
-                file.write(f"0\n已清空\n计数:0\n0")
+            with open(file_name, "w", encoding="utf-8") as file:
+                file.write("0\n已清空\n计数:0\n0")
             show_snack_bar(page, "清空成功", ft.colors.GREEN)
-            txt.value = '已通关0次'
+            txt.value = "已通关0次"
             page.update()
 
     def getnum():
-        file_name = 'logs/notif.txt'
-        cnt='0'
+        file_name = logs_path("notif.txt")
+        cnt = "0"
         if os.path.exists(file_name):
             try:
-                with open(file_name, 'r', encoding="utf-8",errors='ignore') as file:
-                    s=file.readlines()
-                    cnt=s[0].strip('\n')
+                with open(file_name, "r", encoding="utf-8", errors="ignore") as file:
+                    s = file.readlines()
+                    cnt = s[0].strip("\n")
             except:
                 pass
         return cnt
 
-    txt = ft.Text('已通关'+getnum()+'次',weight=ft.FontWeight.W_600,size=20)
+    txt = ft.Text("已通关" + getnum() + "次", weight=ft.FontWeight.W_600, size=20)
     page.views.append(
         ft.View(
             "/config",
@@ -139,29 +141,29 @@ def config_view(page: Page):
                                             label="沉浸奖励",
                                             value=get_info_mode(config.bonus),
                                             on_change=bonus_checkbox_changed,
-                                            label_position='left',
-                                            scale=1.2
+                                            label_position="left",
+                                            scale=1.2,
                                         ),
                                         ft.Switch(
                                             label="调试模式",
                                             value=get_info_mode(config.debug_mode),
                                             on_change=debug_checkbox_changed,
-                                            label_position='left',
-                                            scale=1.2
+                                            label_position="left",
+                                            scale=1.2,
                                         ),
                                         ft.Switch(
                                             label="速通模式",
                                             value=get_info_mode(config.speed_mode),
                                             on_change=speed_checkbox_changed,
-                                            label_position='left',
-                                            scale=1.2
+                                            label_position="left",
+                                            scale=1.2,
                                         ),
                                         ft.Switch(
                                             label="慢速模式",
                                             value=get_info_mode(config.slow_mode),
                                             on_change=slow_checkbox_changed,
-                                            label_position='left',
-                                            scale=1.2
+                                            label_position="left",
+                                            scale=1.2,
                                         ),
                                     ]
                                 ),
@@ -179,7 +181,10 @@ def config_view(page: Page):
                                                 ft.dropdown.Option("4"),
                                                 ft.dropdown.Option("5"),
                                             ],
-                                            text_style=TextStyle(color=ft.colors.PINK_600,weight=ft.FontWeight.W_600),
+                                            text_style=TextStyle(
+                                                color=ft.colors.PINK_600,
+                                                weight=ft.FontWeight.W_600,
+                                            ),
                                             value=config.difficult,
                                             on_change=difficult_changed,
                                         ),
@@ -198,7 +203,10 @@ def config_view(page: Page):
                                                 ft.dropdown.Option("繁育"),
                                                 ft.dropdown.Option("智识"),
                                             ],
-                                            text_style=TextStyle(color=ft.colors.PINK_600,weight=ft.FontWeight.W_600),
+                                            text_style=TextStyle(
+                                                color=ft.colors.PINK_600,
+                                                weight=ft.FontWeight.W_600,
+                                            ),
                                             value=config.fate,
                                             on_change=fate_changed,
                                         ),
@@ -212,7 +220,10 @@ def config_view(page: Page):
                                                 ft.dropdown.Option("America"),
                                                 ft.dropdown.Option("Europe"),
                                             ],
-                                            text_style=TextStyle(color=ft.colors.PINK_600,weight=ft.FontWeight.W_600),
+                                            text_style=TextStyle(
+                                                color=ft.colors.PINK_600,
+                                                weight=ft.FontWeight.W_600,
+                                            ),
                                             value=config.timezone,
                                             on_change=timezone_changed,
                                         ),
@@ -232,12 +243,18 @@ def config_view(page: Page):
                                 ),
                                 ft.Row(
                                     [
-                                        ft.Text("本轮运行：",weight=ft.FontWeight.W_400,size=18),
+                                        ft.Text(
+                                            "本轮运行：",
+                                            weight=ft.FontWeight.W_400,
+                                            size=18,
+                                        ),
                                         ft.TextButton(
                                             text=str(config.max_run),
                                             on_click=lambda _: go_input_x(page),
                                         ),
-                                        ft.Text("次",weight=ft.FontWeight.W_400,size=18),
+                                        ft.Text(
+                                            "次", weight=ft.FontWeight.W_400, size=18
+                                        ),
                                     ]
                                 ),
                                 ft.Container(height=60),
@@ -245,13 +262,17 @@ def config_view(page: Page):
                                     content=ft.Row(
                                         [
                                             ft.Icon(ft.icons.THUMB_UP),
-                                            ft.Text("赞赏", weight=ft.FontWeight.W_800, size=16),
+                                            ft.Text(
+                                                "赞赏",
+                                                weight=ft.FontWeight.W_800,
+                                                size=16,
+                                            ),
                                         ],
                                         alignment=ft.MainAxisAlignment.SPACE_AROUND,
                                     ),
                                     on_click=go_money,
                                     width=150,
-                                    height=50
+                                    height=50,
                                 ),
                             ],
                             alignment=MainAxisAlignment.SPACE_AROUND,
@@ -267,6 +288,7 @@ def config_view(page: Page):
         )
     )
 
+
 def go_input_x(page):
     def close_dialog(e, cancel=False):
         if not cancel:
@@ -280,13 +302,14 @@ def go_input_x(page):
                 pass
         dialog.open = False
         page.update()
+
     x_button = page.views[-1].controls[-1].controls[-1].controls[-3].controls[1]
     textfield_ref = ft.TextField(
         label="运行次数（-1为无限循环）",
         keyboard_type=ft.KeyboardType.NUMBER,
         on_submit=close_dialog,
     )
-    
+
     dialog = ft.AlertDialog(
         title=ft.Text("输入运行次数"),
         content=textfield_ref,
@@ -300,4 +323,3 @@ def go_input_x(page):
     page.dialog = dialog
     dialog.open = True
     page.update()
-

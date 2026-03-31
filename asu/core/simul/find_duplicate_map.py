@@ -1,5 +1,8 @@
-import cv2 as cv
 import os
+
+import cv2 as cv
+
+from asu.core.common.paths import maps_dir
 
 
 def extract_features(img):
@@ -43,5 +46,5 @@ def filter_similar_images(img_set, threshold):
     return similar_images
 
 
-path = "../imgs/maps"
+path = maps_dir()
 print(filter_similar_images(load_images(path), 0.5))

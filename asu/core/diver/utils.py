@@ -1,44 +1,58 @@
-import pyautogui
-import cv2 as cv
-import numpy as np
-import time
-
-import win32api
-import win32gui
-import win32con
-from copy import deepcopy
 import math
 import random
-import os
-from PIL import Image, ImageDraw, ImageFont
-from math import sin, cos
+import threading
+import time
 import traceback
+from copy import deepcopy
+from datetime import datetime
+from math import cos, sin
+from pathlib import Path
 
-from asu.core.common.runtime import notif as runtime_notif, set_forground as runtime_set_forground
+import cv2 as cv
+import numpy as np
+import pyautogui
+import win32api
+import win32con
+import win32gui
+from PIL import Image, ImageDraw, ImageFont
+
+import asu.core.diver.keyops as keyops
+import asu.core.diver.ocr as ocr
+from asu.core.common.interaction import (
+    calc_point as common_calc_point,
+)
 from asu.core.common.interaction import (
     calculated as common_calculated,
-    calc_point as common_calc_point,
+)
+from asu.core.common.interaction import (
     click as common_click,
+)
+from asu.core.common.interaction import (
     click_box as common_click_box,
+)
+from asu.core.common.interaction import (
     click_position as common_click_position,
+)
+from asu.core.common.interaction import (
     drag as common_drag,
+)
+from asu.core.common.interaction import (
     get_local as common_get_local,
+)
+from asu.core.common.interaction import (
     get_point as common_get_point,
+)
+from asu.core.common.interaction import (
     scan_screenshot as common_scan_screenshot,
 )
+from asu.core.common.paths import img_path
+from asu.core.common.runtime import notif as runtime_notif
+from asu.core.common.runtime import set_forground as runtime_set_forground
 from asu.core.common.window import wait_game_window_state
 from asu.core.diver.config import config
-from asu.core.diver.args import args
-from asu.core.platform.log import log
-import asu.core.diver.ocr as ocr
-import asu.core.diver.keyops as keyops
-from asu.core.platform.screenshot import Screen
-import threading
+from asu.core.platform.log import log, print_exc
 from asu.core.platform.log import my_print as print
-from asu.core.platform.log import print_exc
-
-from pathlib import Path
-from datetime import datetime
+from asu.core.platform.screenshot import Screen
 
 
 def notif(title, msg, cnt=None):
@@ -65,7 +79,7 @@ class UniverseUtils:
         self.fail_count = 0
         self.first_mini = 1
         self.ts = ocr.My_TS(father=self)
-        self.last_info = ''
+        self.last_info = ""
         self.mini_target = 0
         self.f_time = 0
         self.slow = 0
@@ -100,12 +114,14 @@ class UniverseUtils:
         self.real_width = window_state["real_width"]
         self.sct = Screen()
 
-    def gen_hotkey_img(self,hotkey="e",bg="imgs/f_bg.jpg"):
+    def gen_hotkey_img(self, hotkey="e", bg=None):
         hotkey = hotkey.upper()
+        if bg is None:
+            bg = img_path("f_bg.jpg")
         image = Image.open(bg)
-        font = ImageFont.truetype("imgs/base.ttf", 24)
+        font = ImageFont.truetype(img_path("base.ttf"), 24)
         d = ImageDraw.Draw(image)
-        position = (2,-3)
+        position = (2, -3)
         color = (152, 214, 241)
         d.text(position, hotkey, font=font, fill=color)
         return np.array(image)
@@ -113,9 +129,9 @@ class UniverseUtils:
     def press(self, c, t=0):
         if c not in "3r":
             log.debug(f"按下按钮 {c}，等待 {t} 秒后释放")
-        if c=='e' and self.allow_e==0:
+        if c == "e" and self.allow_e == 0:
             return
-        if self.slow and c=='shift':
+        if self.slow and c == "shift":
             return
         if self._stop == 0:
             keyops.keyDown(c)
@@ -126,14 +142,14 @@ class UniverseUtils:
 
     def sprint(self):
         if config.long_press_sprint:
-            keyops.keyDown('shift')
+            keyops.keyDown("shift")
         else:
-            self.press('shift')
+            self.press("shift")
 
     # 示例：调用等待函数进行超时检测
     def wait_fig(self, f, timeout=3):
-        tm=time.time()
-        while time.time()-tm<timeout:
+        tm = time.time()
+        while time.time() - tm < timeout:
             if not f():
                 return 1
             time.sleep(0.1)
@@ -145,33 +161,44 @@ class UniverseUtils:
             self.click((0.903 - 0.06 * (x - 1), 0.827 - 0.14 * (y - 1)))
             time.sleep(0.5)
         # 点击使用
-        self.click((0.154,0.088))
-        self.wait_fig(lambda:not self.check("yes1",0.3812,0.2926), 1.2)
+        self.click((0.154, 0.088))
+        self.wait_fig(lambda: not self.check("yes1", 0.3812, 0.2926), 1.2)
         # 点击确认
-        self.click((0.386,0.294))
-        r = self.wait_fig(lambda:not self.check("use_replace",0.5260,0.6935), 0.8)
+        self.click((0.386, 0.294))
+        r = self.wait_fig(lambda: not self.check("use_replace", 0.5260, 0.6935), 0.8)
         if r:
             # 覆盖效果
-            self.click((0.386,0.294))
+            self.click((0.386, 0.294))
 
     # 按行列选择并使用消耗品
     def use_consumable(self, x=1, y=1):
         self.press("b")
-        if self.wait_fig(lambda:not self.check("use_package",0.5182,0.9407), 3):
+        if self.wait_fig(lambda: not self.check("use_package", 0.5182, 0.9407), 3):
             time.sleep(0.4)
-            self.click((0.3677,0.0861))
+            self.click((0.3677, 0.0861))
             time.sleep(0.4)
             self.get_screen()
-            if self.wait_fig(lambda:not self.check("use_star",0.8828,0.8648,threshold=0.9), 0.8):
+            if self.wait_fig(
+                lambda: not self.check("use_star", 0.8828, 0.8648, threshold=0.9), 0.8
+            ):
                 self.use_it(x, y)
-                if self.wait_fig(lambda:not self.check("use_def",0.3198,0.0880), 2.2):
+                if self.wait_fig(
+                    lambda: not self.check("use_def", 0.3198, 0.0880), 2.2
+                ):
                     time.sleep(0.4)
-                    self.click((0.3198,0.0880))
+                    self.click((0.3198, 0.0880))
                     time.sleep(0.4)
                     self.get_screen()
-                    if self.wait_fig(lambda:not self.check("use_star",0.8828,0.8648,threshold=0.9), 0.6):
+                    if self.wait_fig(
+                        lambda: (
+                            not self.check("use_star", 0.8828, 0.8648, threshold=0.9)
+                        ),
+                        0.6,
+                    ):
                         self.use_it(x, y)
-                        self.wait_fig(lambda:not self.check("use_package",0.5182,0.9407), 2)
+                        self.wait_fig(
+                            lambda: not self.check("use_package", 0.5182, 0.9407), 2
+                        )
                         time.sleep(0.3)
                     self.press("esc")
             else:
@@ -179,7 +206,7 @@ class UniverseUtils:
         if not self.isrun():
             for _ in range(3):
                 self.press("esc")
-                if self.wait_fig(lambda:not self.isrun(), 3):
+                if self.wait_fig(lambda: not self.isrun(), 3):
                     return
 
     def get_point(self, x, y):
@@ -198,7 +225,7 @@ class UniverseUtils:
         img = self.get_screen()
         pt = self.ts.find_with_text([text])
         if pt:
-            pt = pt[0]['box']
+            pt = pt[0]["box"]
             if click:
                 self.click(
                     (
@@ -244,7 +271,7 @@ class UniverseUtils:
         return common_get_local(self, x, y, size, large=large)
 
     def format_path(self, path):
-        return f"imgs/{path}.jpg"
+        return img_path(f"{path}.jpg")
 
     # 判断截图中匹配中心点附近是否存在匹配模板
     # 模板匹配参数：模板路径、中心点、遮罩区域与匹配阈值
@@ -253,7 +280,7 @@ class UniverseUtils:
             threshold = self.threshold
         path = self.format_path(path)
         target = cv.imread(path)
-        if path == 'imgs/f.jpg' and config.mapping[0]!='f':
+        if path == img_path("f.jpg") and config.mapping[0] != "f":
             target = self.gen_hotkey_img(config.mapping[0])
             threshold -= 0.01
         target = cv.resize(
@@ -273,19 +300,27 @@ class UniverseUtils:
             return local_screen
         result = cv.matchTemplate(local_screen, target, cv.TM_CCORR_NORMED)
         min_val, max_val, min_loc, max_loc = cv.minMaxLoc(result)
-        self.tx = x - (max_loc[0] - 0.5 * local_screen.shape[1] + 0.5 * target.shape[1]) / self.xx
-        self.ty = y - (max_loc[1] - 0.5 * local_screen.shape[0] + 0.5 * target.shape[0]) / self.yy
-        if path == "./imgs/run.jpg" and 0:
+        self.tx = (
+            x
+            - (max_loc[0] - 0.5 * local_screen.shape[1] + 0.5 * target.shape[1])
+            / self.xx
+        )
+        self.ty = (
+            y
+            - (max_loc[1] - 0.5 * local_screen.shape[0] + 0.5 * target.shape[0])
+            / self.yy
+        )
+        if path == img_path("run.jpg") and 0:
             print(max_val)
-            cv.imwrite('target.jpg',target)
-            cv.imwrite('local.jpg',local_screen)
+            cv.imwrite("target.jpg", target)
+            cv.imwrite("local.jpg", local_screen)
         self.tm = max_val
         if max_val > threshold:
             if self.last_info != path:
                 log.info("匹配到图片 %s 相似度 %f 阈值 %f" % (path, max_val, threshold))
             self.last_info = path
         return max_val > threshold
-    
+
     def click_img(self, path, threshold=0.95):
         path = self.format_path(path)
         target = cv.imread(path)
@@ -293,17 +328,17 @@ class UniverseUtils:
         min_val, max_val, min_loc, max_loc = cv.minMaxLoc(result)
         if max_val > threshold:
             x, y = max_loc
-            self.click_position((x + target.shape[1]//2, y + target.shape[0]//2))
+            self.click_position((x + target.shape[1] // 2, y + target.shape[0] // 2))
             return 1
         return 0
-    
-    def check_box(self, path, box=[0,1920,0,1080], threshold=0.96):
+
+    def check_box(self, path, box=[0, 1920, 0, 1080], threshold=0.96):
         path = self.format_path(path)
         target = cv.imread(path)
-        local_screen = self.screen[box[2]:box[3],box[0]:box[1]]
+        local_screen = self.screen[box[2] : box[3], box[0] : box[1]]
         result = cv.matchTemplate(local_screen, target, cv.TM_CCORR_NORMED)
         min_val, max_val, min_loc, max_loc = cv.minMaxLoc(result)
-        self.tx, self.ty = (max_loc[0]+box[0], max_loc[1]+box[2])
+        self.tx, self.ty = (max_loc[0] + box[0], max_loc[1] + box[2])
         self.tm = max_val
         if max_val > threshold:
             if self.last_info != path:
@@ -332,7 +367,7 @@ class UniverseUtils:
                 bw_map[:, cen + 350 // mask :] = 0
             except Exception:
                 pass
-        region = cv.imread("imgs/region.jpg", cv.IMREAD_GRAYSCALE)
+        region = cv.imread(img_path("region.jpg"), cv.IMREAD_GRAYSCALE)
         result = cv.matchTemplate(bw_map, region, cv.TM_CCORR_NORMED)
         min_val, max_val, min_loc, max_loc = cv.minMaxLoc(result)
         if max_val < 0.6:
@@ -354,7 +389,7 @@ class UniverseUtils:
             dx = self.get_end_point()
             off = 0
             if dx is None:
-                for k in [60,120,60,60,30,-60,-60,-60,-60]:
+                for k in [60, 120, 60, 60, 30, -60, -60, -60, -60]:
                     if self.ang_neg:
                         self.mouse_move(k)
                         off -= k
@@ -366,7 +401,7 @@ class UniverseUtils:
                     if dx is not None:
                         break
                 if dx is None:
-                    self.mouse_move(off*1.03)
+                    self.mouse_move(off * 1.03)
                     time.sleep(0.3)
                     return 0
         if i == 0:
@@ -421,7 +456,7 @@ class UniverseUtils:
             Text = win32gui.GetWindowText(hwnd)
         self.screen = self.sct.grab(self.x0, self.y0)
         return self.screen
-    
+
     def save_screen(self, save_path=r"D:\debug", name=""):
         """将当前截图保存到指定目录。"""
         # 获取截图
@@ -467,8 +502,8 @@ class UniverseUtils:
             total_img = cv.bitwise_and(total_mask, total_img)
             time.sleep(dt)
 
-        cv.imwrite("imgs/fine_minimap.jpg", total_img)
-        cv.imwrite("imgs/fine_mask.jpg", total_mask)
+        cv.imwrite(img_path("fine_minimap.jpg"), total_img)
+        cv.imwrite(img_path("fine_mask.jpg"), total_mask)
         return total_img, total_mask
 
     # 进一步得到小地图的黑白格式
@@ -558,12 +593,12 @@ class UniverseUtils:
         time.sleep(2.5)
         tm = time.time()
         self.floor_init = 0
-        while time.time()-tm<5 and not self.floor_init:
+        while time.time() - tm < 5 and not self.floor_init:
             self.get_screen()
             for i in range(12, -1, -1):
                 if self.check("floor/ff" + str(i + 1), 0.0589, 0.8796):
                     self.floor = i
-                    log.info(f"当前层数：{i+1}")
+                    log.info(f"当前层数：{i + 1}")
                     self.floor_init = 1
                     break
         self.press("m", 0.2)
@@ -576,7 +611,7 @@ class UniverseUtils:
             text = self.ts.ocr_one_row(self.screen, [1206, 1437, 587, 635])
             print(text)
             if len(text):
-                log.info('识别到交互信息：'+text)
+                log.info("识别到交互信息：" + text)
                 for i in is_in:
                     if i in text:
                         return 1
@@ -624,7 +659,7 @@ class UniverseUtils:
             sp = minicon.shape
             result = cv.matchTemplate(local_screen, minicon, cv.TM_CCORR_NORMED)
             min_val, max_val, min_loc, max_loc = cv.minMaxLoc(result)
-            if max_val > threshold-0.035*(self.floor in [4,8,11]):
+            if max_val > threshold - 0.035 * (self.floor in [4, 8, 11]):
                 nearest = (max_loc[1] + sp[0] // 2, max_loc[0] + sp[1] // 2)
                 target = (nearest, 2)
                 log.info(f"黑塔相似度{max_val}，位置{max_loc[1]},{max_loc[0]}")
@@ -672,10 +707,10 @@ class UniverseUtils:
         me = 0
         if self.mini_state > 2:
             me = self.move_to_end()
-            self.is_target+=me
+            self.is_target += me
         else:
             self.ang_off += self.move_to_interac(2)
-            self.is_target+=self.ang_off
+            self.is_target += self.ang_off
         self.ready = 1
         now_time = time.time()
         if me == 0:
@@ -686,7 +721,7 @@ class UniverseUtils:
             else:
                 me = max(self.move_to_end(me), me)
         try:
-            '''
+            """
             exec(
                 self.mag
                 + "p show n"
@@ -694,30 +729,33 @@ class UniverseUtils:
                 + "y > NU"
                 + "L 2>&1') and not self.unlock"
             )
-            '''
+            """
             pass
         except Exception:
             pass
 
-    def nof(self,must_be=None):
+    def nof(self, must_be=None):
         tm = time.time()
         ava = 0
-        while not ava and time.time()-tm<1.6:
+        while not ava and time.time() - tm < 1.6:
             self.get_screen()
-            if not self.check(
-                    "f", 0.4443, 0.4417, mask="mask_f1", threshold=0.96
-                ) and not self.isrun():
+            if (
+                not self.check("f", 0.4443, 0.4417, mask="mask_f1", threshold=0.96)
+                and not self.isrun()
+            ):
                 ava = 1
-        log.info('交互点生效：'+str(ava))
+        log.info("交互点生效：" + str(ava))
         if ava:
-            if must_be == 'event':
+            if must_be == "event":
                 self.mini_state += 2
-            elif self.ts.sim("区域") or must_be=='tp':
+            elif self.ts.sim("区域") or must_be == "tp":
                 self.init_map()
                 self.floor += 1
                 self.f_time = time.time()
                 self.lst_changed = time.time()
-                map_log.info(f"地图{self.now_map}已完成,相似度{self.now_map_sim},进入{self.floor+1}层")
+                map_log.info(
+                    f"地图{self.now_map}已完成,相似度{self.now_map_sim},进入{self.floor + 1}层"
+                )
             else:
                 if self.ts.sim("黑塔"):
                     self.quit = time.time()
@@ -736,7 +774,7 @@ class UniverseUtils:
         bw_map = self.get_bw_map(gs=0)
         self.loc_off = 0
         tm = time.time()
-        self.get_loc(bw_map, rg = 40 - self.find * 10)
+        self.get_loc(bw_map, rg=40 - self.find * 10)
         if self.find == 1:
             self.press("w", 0.2)
         self.get_screen()
@@ -747,11 +785,11 @@ class UniverseUtils:
             self.get_map()
         # 寻路模式
         else:
-            if self.now_map == '19787':
-                self.press('w',0.3)
+            if self.now_map == "19787":
+                self.press("w", 0.3)
                 self.get_screen()
                 local_screen = self.get_local(0.9333, 0.8657, shape)
-                self.now_map = '19788'
+                self.now_map = "19788"
             self.ang = 360 - self.get_now_direc(local_screen) - 90
             self.get_real_loc()
             loc, type = self.get_tar()
@@ -776,7 +814,7 @@ class UniverseUtils:
                 return
             self.mouse_move(sub)
             self.ang = ang
-            ps = [13,9 + self.quan*7,11,7]
+            ps = [13, 9 + self.quan * 7, 11, 7]
             if self._stop == 0:
                 keyops.keyDown("w")
             time.sleep(0.25)
@@ -804,7 +842,12 @@ class UniverseUtils:
                 bw_map = self.get_bw_map()
                 if bw_map is None:
                     return
-                self.get_loc(bw_map, fbw=1, offset=self.get_offset(2+(c<=2)), rg=10+6*(c<=2))
+                self.get_loc(
+                    bw_map,
+                    fbw=1,
+                    offset=self.get_offset(2 + (c <= 2)),
+                    rg=10 + 6 * (c <= 2),
+                )
                 self.get_real_loc(2)
                 ang = (
                     math.atan2(loc[0] - self.real_loc[0], loc[1] - self.real_loc[1])
@@ -824,7 +867,7 @@ class UniverseUtils:
                         self.real_loc[1] - 1 : self.real_loc[1] + 2,
                     ] = 49
                     # 轨迹图
-                    cv.imwrite("imgs/bigmap.jpg", self.big_map)
+                    cv.imwrite(img_path("bigmap.jpg"), self.big_map)
                 nds = self.get_dis(self.real_loc, loc)
                 # 1秒内没有离目标点更近：开始尝试绕过障碍
                 if dls[0] <= nds:
@@ -832,7 +875,7 @@ class UniverseUtils:
                     if t > 0:
                         keyops.keyUp("w")
                         self.press("s", 0.35)
-                        self.press(ts[t], 0.2*random.randint(1,3))
+                        self.press(ts[t], 0.2 * random.randint(1, 3))
                         self.press("w", 0.3)
                         self.move = 1
                         self.get_screen()
@@ -869,11 +912,13 @@ class UniverseUtils:
                         break
                 else:
                     self.get_screen()
-                    if type == 3 and self.check("f", 0.4443, 0.4417, mask="mask_f1", threshold=0.96):
-                        self.press('f')
+                    if type == 3 and self.check(
+                        "f", 0.4443, 0.4417, mask="mask_f1", threshold=0.96
+                    ):
+                        self.press("f")
                         keyops.keyUp("w")
-                        if self.nof(must_be='tp'):
-                            log.info('大图识别到传送点!')
+                        if self.nof(must_be="tp"):
+                            log.info("大图识别到传送点!")
                             return
                     elif (type != 3 and self.goodf()) or not self.isrun():
                         keyops.keyUp("w")
@@ -919,7 +964,7 @@ class UniverseUtils:
                             continue
                         self.get_loc(bw_map, fbw=1, offset=self.get_offset(2), rg=24)
                         self.get_real_loc(1)
-                        self.press('w')
+                        self.press("w")
                         self.bless()
             if type == 3:
                 for i in range(9):
@@ -928,15 +973,15 @@ class UniverseUtils:
                         return
                     if self.check("f", 0.4443, 0.4417, mask="mask_f1", threshold=0.96):
                         log.info("大图识别到传送点")
-                        self.press('f')
-                        if self.nof(must_be='tp'):
+                        self.press("f")
+                        if self.nof(must_be="tp"):
                             time.sleep(1.5)
                             break
                     self.get_screen()
                     if self.isrun():
-                        if i in [0,4]:
+                        if i in [0, 4]:
                             self.move_to_end()
-                        self.press('w', 0.5)
+                        self.press("w", 0.5)
                         time.sleep(0.2)
             # 离目标点挺近了，准备找下一个目标点
             elif nds <= 20 or self.quan:
@@ -948,7 +993,7 @@ class UniverseUtils:
                     pass
 
     def keep_move(self):
-        op = 'ws'
+        op = "ws"
         i = 0
         while self.move and not self._stop:
             self.press(op[i], 0.05)
@@ -999,10 +1044,11 @@ class UniverseUtils:
         loc_big = np.zeros((rge * 2, rge * 2), dtype=self.big_map.dtype)
         tpl = (self.now_loc[0], self.now_loc[1])
         if offset is not None:
-            tpl = (tpl[0]+int(offset[0]),tpl[1]+int(offset[1]))
+            tpl = (tpl[0] + int(offset[0]), tpl[1] + int(offset[1]))
         x0, y0 = max(rge - tpl[0], 0), max(rge - tpl[1], 0)
-        x1, y1 = max(tpl[0] + rge - self.big_map.shape[0], 0), max(
-            tpl[1] + rge - self.big_map.shape[1], 0
+        x1, y1 = (
+            max(tpl[0] + rge - self.big_map.shape[0], 0),
+            max(tpl[1] + rge - self.big_map.shape[1], 0),
         )
         # 从大地图中截取对应部分
         loc_big[x0 : rge * 2 - x1, y0 : rge * 2 - y1] = self.big_map[
@@ -1029,19 +1075,19 @@ class UniverseUtils:
             for j in range(rge * 2 - 176):
                 if (i - rge + 88) ** 2 + (j - rge + 88) ** 2 > rg**2:
                     continue
-                p = 2*np.count_nonzero(bo_3[i : i + 176, j : j + 176] & bo_1)
+                p = 2 * np.count_nonzero(bo_3[i : i + 176, j : j + 176] & bo_1)
                 p += np.count_nonzero(bo_3[i : i + 176, j : j + 176] & bo_4)
                 if p > max_val:
                     max_val = p
                     max_loc = (i, j)
                     if self.debug == 2:
-                        tmp = np.zeros((176,176), dtype=np.uint8)
+                        tmp = np.zeros((176, 176), dtype=np.uint8)
                         tpp = bo_3[i : i + 176, j : j + 176]
-                        tmp[tpp!=0]=255
-                        tmp[bo_1!=0]=150
-                        tmp[bo_4!=0]=50
+                        tmp[tpp != 0] = 255
+                        tmp[bo_1 != 0] = 150
+                        tmp[bo_4 != 0] = 50
                 if self.find and fbw == 0:
-                    p = 2*np.count_nonzero(bo_3[i : i + 176, j : j + 176] & bo_2)
+                    p = 2 * np.count_nonzero(bo_3[i : i + 176, j : j + 176] & bo_2)
                     p += np.count_nonzero(bo_3[i : i + 176, j : j + 176] & bo_5)
                     if p > max_val:
                         max_val = p
@@ -1052,19 +1098,19 @@ class UniverseUtils:
                 max_loc[1] + 88 - rge + self.now_loc[1],
             )
         if self.debug == 2:
-            cv.imwrite('tp/'+str(time.time())+'.jpg',tmp)
+            cv.imwrite("tp/" + str(time.time()) + ".jpg", tmp)
 
-    def get_real_loc(self,delta=0):
+    def get_real_loc(self, delta=0):
         x, y = self.now_loc
         dx, dy = self.get_offset(delta=delta)
-        self.real_loc = (int(x+10+dx),int(y+dy))
+        self.real_loc = (int(x + 10 + dx), int(y + dy))
 
-    def get_offset(self,delta=1):
+    def get_offset(self, delta=1):
         if self.slow:
             delta /= 2
         pi = 3.141592653589
-        dx, dy = sin(self.ang/180*pi), cos(self.ang/180*pi)
-        return (delta*dx*3,delta*dy*3)
+        dx, dy = sin(self.ang / 180 * pi), cos(self.ang / 180 * pi)
+        return (delta * dx * 3, delta * dy * 3)
 
     # 从8192*8192的超大地图中找到有意义的大地图
     def get_map(self):
@@ -1106,7 +1152,7 @@ class UniverseUtils:
         cv.imwrite(self.map_file + "target.jpg", tp)
 
     def extract_features(self, img):
-        img = img[50:-50,50:-50,:]
+        img = img[50:-50, 50:-50, :]
         orb = cv.ORB_create()
         # 检测关键点和计算描述符
         keypoints, descriptors = orb.detectAndCompute(img, None)
@@ -1124,7 +1170,7 @@ class UniverseUtils:
     # 匹配地图，找到最相似的地图，确定当前房间对应的地图
     def match_scr(self, img):
         key = self.extract_features(img)
-        img = self.get_bw_map(gs=0,local_screen=img)
+        img = self.get_bw_map(gs=0, local_screen=img)
         sim = -1
         ans = -1
         matcher = cv.BFMatcher(cv.NORM_HAMMING, crossCheck=True)
@@ -1133,20 +1179,24 @@ class UniverseUtils:
             try:
                 matches = matcher.match(key, j)
                 similarity_score = len(matches) / max(len(key), len(j))
-                res.append((similarity_score,i))
+                res.append((similarity_score, i))
             except (cv.error, TypeError, ValueError):
                 pass
         res = sorted(res, key=lambda x: x[0])[-3:]
         try:
-            if res[-1][0]>res[-2][0]+0.065 and (res[-1][0]>0.4 or self.debug!=2):
+            if res[-1][0] > res[-2][0] + 0.065 and (
+                res[-1][0] > 0.4 or self.debug != 2
+            ):
                 return res[-1][1], 0.9
         except IndexError:
             return -1, -1
         i_s = [x[1] for x in res]
         for i in i_s[::-1]:
-            bw_j = self.get_bw_map(gs=0,local_screen=self.img_map[i])
-            big_bw_j = np.zeros((bw_j.shape[0]+28,bw_j.shape[1]+28),dtype=bw_j.dtype)
-            big_bw_j[14:-14,14:-14] = bw_j
+            bw_j = self.get_bw_map(gs=0, local_screen=self.img_map[i])
+            big_bw_j = np.zeros(
+                (bw_j.shape[0] + 28, bw_j.shape[1] + 28), dtype=bw_j.dtype
+            )
+            big_bw_j[14:-14, 14:-14] = bw_j
             result = cv.matchTemplate(big_bw_j, img, cv.TM_CCORR_NORMED)
             min_val, max_val, min_loc, max_loc = cv.minMaxLoc(result)
             if max_val > sim:
@@ -1170,33 +1220,44 @@ class UniverseUtils:
             stk = traceback.extract_stack()
             for i in range(num):
                 try:
-                    print(stk[-2].name,stk[-3-i].filename.split('\\')[-1].split('.')[0],stk[-3-i].name,stk[-3-i].lineno)
+                    print(
+                        stk[-2].name,
+                        stk[-3 - i].filename.split("\\")[-1].split(".")[0],
+                        stk[-3 - i].name,
+                        stk[-3 - i].lineno,
+                    )
                 except IndexError:
                     pass
 
     def check_auto(self):
-        auto = self.check("z", 0.0878,0.9630, large=False, mask="mask_auto")
+        auto = self.check("z", 0.0878, 0.9630, large=False, mask="mask_auto")
         cvt = cv.cvtColor(auto, cv.COLOR_BGR2HSV)
         lower = np.array([22, 58, 100])
         upper = np.array([26, 100, 255])
         mask = cv.inRange(cvt, lower, upper)
-        result = np.sum(mask)//255
+        result = np.sum(mask) // 255
         return result > 100 and result < 280
-    
+
     def isrun(self):
         scr = self.screen
         shape = (int(self.scx * 12), int(self.scx * 12))
         loc_scr = self.get_local(0.9333, 0.8657, shape)
         hsv = cv.cvtColor(loc_scr, cv.COLOR_BGR2HSV)  # 转为色相空间
-        lower = np.array([93, 120, 60])  # 90 改成120只剩箭头，但是角色移动过的印记会消失
+        lower = np.array(
+            [93, 120, 60]
+        )  # 90 改成120只剩箭头，但是角色移动过的印记会消失
         upper = np.array([97, 255, 255])
         mask = cv.inRange(hsv, lower, upper)  # 创建掩膜
         sum = np.sum(mask)
         scr_bak = deepcopy(scr)
-        scr[np.min(scr,axis=-1)<=220]=[0,0,0]
-        scr[np.min(scr,axis=-1)>220]=[255,255,255]
-        res = self.check('run',0.876,0.7815,threshold=0.91) and sum > 40000 and sum < 65000
-        if self.tm>0.96:
+        scr[np.min(scr, axis=-1) <= 220] = [0, 0, 0]
+        scr[np.min(scr, axis=-1) > 220] = [255, 255, 255]
+        res = (
+            self.check("run", 0.876, 0.7815, threshold=0.91)
+            and sum > 40000
+            and sum < 65000
+        )
+        if self.tm > 0.96:
             res = 1
         self.screen = deepcopy(scr_bak)
         if res:
@@ -1204,106 +1265,108 @@ class UniverseUtils:
         return res
 
     def get_direc_only_minimap(self):
-        if self.debug==2:
-            print('mini',self.ang_off,self.mini_state)
-        self.ang_neg=self.ang_off<0
+        if self.debug == 2:
+            print("mini", self.ang_off, self.mini_state)
+        self.ang_neg = self.ang_off < 0
         if self.ang_off:
             time.sleep(0.6)
-            self.mouse_move(-self.ang_off*1.2)
+            self.mouse_move(-self.ang_off * 1.2)
             time.sleep(0.3)
-            self.press('w',0.3)
-        if self.mini_state==1 and self.floor in [4,8,11]:
+            self.press("w", 0.3)
+        if self.mini_state == 1 and self.floor in [4, 8, 11]:
             time.sleep(0.5)
-            self.press('w',0.55)
+            self.press("w", 0.55)
             pyautogui.click()
             time.sleep(1.2)
-            self.press('w')
+            self.press("w")
             time.sleep(0.4)
-        if self.mini_state==3 and self.floor==12 and not self.check_bonus:
-            self.mini_state+=2
+        if self.mini_state == 3 and self.floor == 12 and not self.check_bonus:
+            self.mini_state += 2
             return
-        if self.mini_state==3 and self.floor in [3,7,12] and self.check_bonus:
-            self.press('d',0.6)
-            keyops.keyDown('w')
+        if self.mini_state == 3 and self.floor in [3, 7, 12] and self.check_bonus:
+            self.press("d", 0.6)
+            keyops.keyDown("w")
             nt = time.time()
-            while time.time()-nt<1.3:
+            while time.time() - nt < 1.3:
                 self.get_screen()
                 if self.check("f", 0.4443, 0.4417, mask="mask_f1", threshold=0.96):
-                    self.press('f')
-                    keyops.keyUp('w')
+                    self.press("f")
+                    keyops.keyUp("w")
                     break
-            keyops.keyUp('w')
-            self.press('f')
+            keyops.keyUp("w")
+            self.press("f")
             time.sleep(1)
             for _ in range(2):
                 if not self.check_bonus:
                     break
                 self.get_screen()
-                if self.check('bonus_c',0.2385,0.6685):
-                    self.click((0.4453,0.3250))
+                if self.check("bonus_c", 0.2385, 0.6685):
+                    self.click((0.4453, 0.3250))
                     time.sleep(1.5)
                     self.get_screen()
-                    if self.check('lack',0.5036,0.6769):
+                    if self.check("lack", 0.5036, 0.6769):
                         self.check_bonus = 0
                     self.click((0.5062, 0.1454))
                     time.sleep(1.4)
-            keyops.keyUp('w')
+            keyops.keyUp("w")
             self.get_screen()
-            if self.check('bonus_c',0.2385,0.6685):
-                self.click((0.2385,0.6685))
-            self.mini_state+=2
-            if self.floor==12:
+            if self.check("bonus_c", 0.2385, 0.6685):
+                self.click((0.2385, 0.6685))
+            self.mini_state += 2
+            if self.floor == 12:
                 return
-            self.press('s',0.4)
-        self.ang_off=0
-        self.stop_move=0
-        self.ready=0
-        self.mini_target=0
+            self.press("s", 0.4)
+        self.ang_off = 0
+        self.stop_move = 0
+        self.ready = 0
+        self.mini_target = 0
         self.get_screen()
-        self.is_target=0
+        self.is_target = 0
         first = self.first_mini
         threading.Thread(target=self.move_thread).start()
         while not self.ready:
             time.sleep(0.1)
         if not self.ang_off and self.mini_state == 1:
-            if self.check("z",0.5906,0.9537,mask="mask_z",threshold=0.95):
+            if self.check("z", 0.5906, 0.9537, mask="mask_z", threshold=0.95):
                 if self.floor == 11:
                     self.floor = 12
         keyops.keyDown("w")
         wt = 3
         self.first_mini = 0
         sft = 0
-        if self.mini_state==1:
+        if self.mini_state == 1:
             wt += 1
-            if self.mini_target!=2:
+            if self.mini_target != 2:
                 self.sprint()
                 sft = 1
-            if self.mini_target==1:
+            if self.mini_target == 1:
                 wt += 0.8
-        need_confirm=0
+        need_confirm = 0
         init_time = time.time()
         while True:
             self.get_screen()
             if self._stop == 1:
                 keyops.keyUp("w")
-                self.stop_move=1
+                self.stop_move = 1
                 break
-            if self.mini_target==1:
+            if self.mini_target == 1:
                 if self.check("f", 0.4443, 0.4417, mask="mask_f1", threshold=0.96):
-                    self.press('f')
-                    log.info('发现事件交互')
-                    self.stop_move=1
+                    self.press("f")
+                    log.info("发现事件交互")
+                    self.stop_move = 1
                     need_confirm = 1
-                    if self.nof(must_be='event'):
+                    if self.nof(must_be="event"):
                         keyops.keyUp("w")
                         return
                     break
             else:
-                if self.goodf() and not (self.ts.sim("黑塔") and time.time() - self.quit < 30):
+                if self.goodf() and not (
+                    self.ts.sim("黑塔") and time.time() - self.quit < 30
+                ):
                     if self.speed <= 0 or not self.ts.sim("黑塔"):
-                        self.press('f')
-                        log.info('need_confirm '+self.ts.text)
-                        self.stop_move=1
+                        self.press("f")
+                        log.info("need_confirm " + self.ts.text)
+                        self.stop_move = 1
                         need_confirm = 1
                         if self.nof():
                             keyops.keyUp("w")
@@ -1312,34 +1375,49 @@ class UniverseUtils:
                     else:
                         self.quit = time.time()
                         keyops.keyUp("w")
-                        self.stop_move=1
-                        self.mini_state+=2
+                        self.stop_move = 1
+                        self.mini_state += 2
                         return
-                if self.check("auto_2", 0.0583, 0.0769): 
+                if self.check("auto_2", 0.0583, 0.0769):
                     keyops.keyUp("w")
-                    self.stop_move=1
-                    self.mini_state+=2
+                    self.stop_move = 1
+                    self.mini_state += 2
                     break
-                if self.check("z",0.5906,0.9537,mask="mask_z",threshold=0.95):
-                    self.stop_move=1
-                    time.sleep(1.7+self.slow*1.1-(self.quan and self.floor not in [3, 7, 12])*0.5)
-                    if self.mini_state==1 and self.floor in [3, 7, 12] and not self.quan:
+                if self.check("z", 0.5906, 0.9537, mask="mask_z", threshold=0.95):
+                    self.stop_move = 1
+                    time.sleep(
+                        1.7
+                        + self.slow * 1.1
+                        - (self.quan and self.floor not in [3, 7, 12]) * 0.5
+                    )
+                    if (
+                        self.mini_state == 1
+                        and self.floor in [3, 7, 12]
+                        and not self.quan
+                    ):
                         keyops.keyUp("w")
-                        if not self.check("ruan",0.0625,0.7065,threshold=0.95) and not self.check("U", 0.0240,0.7759):
-                            for i in range([3, 7, 12].index(self.floor)+2):
-                                self.press(str(i+1))
+                        if not self.check(
+                            "ruan", 0.0625, 0.7065, threshold=0.95
+                        ) and not self.check("U", 0.0240, 0.7759):
+                            for i in range([3, 7, 12].index(self.floor) + 2):
+                                self.press(str(i + 1))
                                 time.sleep(0.4)
                                 self.use_e()
                                 self.get_screen()
-                                if not self.check("z",0.5906,0.9537,mask="mask_z",threshold=0.95):
+                                if not self.check(
+                                    "z", 0.5906, 0.9537, mask="mask_z", threshold=0.95
+                                ):
                                     break
                                 if self._stop:
                                     break
                             keyops.keyDown("w")
                     iters = 0
-                    while self.check("z",0.5906,0.9537,mask="mask_z",threshold=0.95) and not self._stop:
-                        iters+=1
-                        if iters>4:
+                    while (
+                        self.check("z", 0.5906, 0.9537, mask="mask_z", threshold=0.95)
+                        and not self._stop
+                    ):
+                        iters += 1
+                        if iters > 4:
                             break
                         if self.quan:
                             keyops.keyUp("w")
@@ -1347,10 +1425,10 @@ class UniverseUtils:
                             if self.floor not in [3, 7, 12]:
                                 for _ in range(3):
                                     self.use_e()
-                                self.stop_move=1
-                                self.mini_state+=2
+                                self.stop_move = 1
+                                self.mini_state += 2
                                 time.sleep(0.4)
-                                self.press('w')
+                                self.press("w")
                                 time.sleep(1.4)
                                 return
                             else:
@@ -1360,40 +1438,42 @@ class UniverseUtils:
                             pyautogui.click()
                         if iters + self.quan == 2:
                             time.sleep(0.9)
-                            self.press('d',0.85)
-                            self.press('a',0.3)
+                            self.press("d", 0.85)
+                            self.press("a", 0.3)
                         else:
                             time.sleep(1.2)
                         self.get_screen()
-                    self.mini_state+=2
+                    self.mini_state += 2
                     break
-            if time.time()-init_time>wt:
-                self.stop_move=1
+            if time.time() - init_time > wt:
+                self.stop_move = 1
                 keyops.keyUp("w")
-                self.mini_state+=2
-                if self.mini_state>=7:
+                self.mini_state += 2
+                if self.mini_state >= 7:
                     self.lst_changed = 0
                     return
-                self.press('s',0.3)
-                self.press('a',0.7)
-                self.press('d',0.45)
-                self.press('w',0.5)
+                self.press("s", 0.3)
+                self.press("a", 0.7)
+                self.press("d", 0.45)
+                self.press("w", 0.5)
                 break
             time.sleep(0.1)
-        self.stop_move=1
+        self.stop_move = 1
         keyops.keyUp("w")
-        if need_confirm or (first and self.mini_target!=2):
+        if need_confirm or (first and self.mini_target != 2):
             for i in "sasddwwaa":
                 if self._stop:
                     return
                 self.get_screen()
-                if self.mini_target==1:
+                if self.mini_target == 1:
                     if self.check("f", 0.4443, 0.4417, mask="mask_f1", threshold=0.96):
-                        self.press('f')
-                        if self.nof(must_be='event'):
+                        self.press("f")
+                        if self.nof(must_be="event"):
                             return
-                elif self.goodf() and not (self.ts.sim("黑塔") and time.time() - self.quit < 30):
-                    self.press('f')
+                elif self.goodf() and not (
+                    self.ts.sim("黑塔") and time.time() - self.quit < 30
+                ):
+                    self.press("f")
                     if self.nof():
                         return
                 self.press(i, 0.25)
@@ -1402,8 +1482,8 @@ class UniverseUtils:
 
     def solve_snack(self):
         self.get_screen()
-        if self.check('snack', 0.3844,0.5065, mask='mask_snack'):
-            self.click((self.tx,self.ty))
+        if self.check("snack", 0.3844, 0.5065, mask="mask_snack"):
+            self.click((self.tx, self.ty))
             time.sleep(0.3)
             self.click_position([1184, 815])
             time.sleep(0.4)
@@ -1413,21 +1493,21 @@ class UniverseUtils:
         self.click_position([768, 815])
         time.sleep(0.6)
         if self.allow_e:
-            self.press('e')
+            self.press("e")
 
     def use_e(self):
-        self.press('e')
+        self.press("e")
         time.sleep(0.4)
         if not self.quan:
             time.sleep(0.8)
         self.get_screen()
-        if self.check('e',0.4995,0.7500):
+        if self.check("e", 0.4995, 0.7500):
             self.solve_snack()
 
     def bless(self):
         self.get_screen()
-        if self.wait_fig(lambda:not self.check("choose_bless", 0.9266, 0.9491), 2.3):
-            self.wait_fig(lambda:not self.check("reset",0.2938,0.0954), 0.7)
+        if self.wait_fig(lambda: not self.check("choose_bless", 0.9266, 0.9491), 2.3):
+            self.wait_fig(lambda: not self.check("reset", 0.2938, 0.0954), 0.7)
             time.sleep(1.2)
         else:
             return
@@ -1435,7 +1515,7 @@ class UniverseUtils:
             chose = 0
             self.battle = 0
             self.get_screen()
-            if self.check("reset",0.2938,0.0954, threshold=0.96):
+            if self.check("reset", 0.2938, 0.0954, threshold=0.96):
                 for _ in range(14):
                     self.get_screen()
                     img_down = self.check("z", 0.5042, 0.3204, mask="mask", large=False)
@@ -1450,7 +1530,9 @@ class UniverseUtils:
                     time.sleep(0.2)
                 self.get_screen()
                 img_up = self.check("z", 0.5047, 0.5491, mask="mask_bless", large=False)
-                res_up = self.ts.split_and_find(self.tk.prior_bless, img_up, bless_skip=self.tk.skip)
+                res_up = self.ts.split_and_find(
+                    self.tk.prior_bless, img_up, bless_skip=self.tk.skip
+                )
                 img_down = self.check("z", 0.5042, 0.3204, mask="mask", large=False)
                 res_down = self.ts.split_and_find([self.fate], img_down, mode="bless")
                 if res_up[1] == 2:
@@ -1475,7 +1557,9 @@ class UniverseUtils:
                     time.sleep(0.2)
                 self.get_screen()
                 img_up = self.check("z", 0.5047, 0.5491, mask="mask_bless", large=False)
-                res_up = self.ts.split_and_find(self.tk.prior_bless, img_up,bless_skip=self.tk.skip)
+                res_up = self.ts.split_and_find(
+                    self.tk.prior_bless, img_up, bless_skip=self.tk.skip
+                )
                 img_down = self.check("z", 0.5042, 0.3204, mask="mask", large=False)
                 res_down = self.ts.split_and_find(
                     self.tk.secondary, img_down, mode="bless"
@@ -1495,13 +1579,25 @@ class UniverseUtils:
 
     def get_text_position(self, clean=0):
         if self.event_mask is None:
-            self.event_mask = (cv.imread('imgs/divergent/event_mask.jpg', cv.IMREAD_GRAYSCALE) > 70)[:497]
-            self.event_mask_clean = (cv.imread('imgs/divergent/event_mask_clean.jpg', cv.IMREAD_GRAYSCALE) > 70)[:497]
+            self.event_mask = (
+                cv.imread(img_path("divergent", "event_mask.jpg"), cv.IMREAD_GRAYSCALE)
+                > 70
+            )[:497]
+            self.event_mask_clean = (
+                cv.imread(
+                    img_path("divergent", "event_mask_clean.jpg"), cv.IMREAD_GRAYSCALE
+                )
+                > 70
+            )[:497]
         scr = self.screen[:497]
         mask = np.zeros((497, scr.shape[1]), dtype=np.uint8)
         mask_zero = np.zeros((497, scr.shape[1]), dtype=np.uint8)
-        mask[((scr.max(axis=-1)-scr.min(axis=-1)) < 3)&(scr.max(axis=-1)>247)] = 255
-        mask_zero[((scr.max(axis=-1)-scr.min(axis=-1)) < 3)&(scr.max(axis=-1)<21)] = 255
+        mask[((scr.max(axis=-1) - scr.min(axis=-1)) < 3) & (scr.max(axis=-1) > 247)] = (
+            255
+        )
+        mask_zero[
+            ((scr.max(axis=-1) - scr.min(axis=-1)) < 3) & (scr.max(axis=-1) < 21)
+        ] = 255
         kernel = np.ones((10, 30), np.uint8)
         mask_zero = cv.dilate(mask_zero, kernel, iterations=1)
         mask &= mask_zero
@@ -1532,10 +1628,8 @@ class UniverseUtils:
         for cnt in contours:
             x, y, w, h = cv.boundingRect(cnt)
             if w * h >= 4 and abs(y - yy) < 20:
-                res.append((x+w//2,y+h//2))
+                res.append((x + w // 2, y + h // 2))
         res = sorted(res, key=lambda x: x[0])
-        if len(res) == 2 and res[1][0]-res[0][0] < 150:
-            res = [((res[0][0]+res[1][0])//2,res[0][1])]
+        if len(res) == 2 and res[1][0] - res[0][0] < 150:
+            res = [((res[0][0] + res[1][0]) // 2, res[0][1])]
         return res
-
-

@@ -1,21 +1,20 @@
-import traceback
+import time
 
 import flet as ft
 import win32gui
-from flet_core import MainAxisAlignment, CrossAxisAlignment
+from flet_core import CrossAxisAlignment, MainAxisAlignment
 
 from asu.apps.align_angle import main as align_angle
 from asu.apps.diver import DivergentUniverse, version
 from asu.apps.simul import SimulatedUniverse
-from asu.ui.common import show_snack_bar, Page, list_handles
-from asu.core.diver.config import config as config_diver
-from asu.core.simul.config import config as config_simul
-from asu.core.simul.update_map import update_map
 from asu.core.common.runtime import notif
 from asu.core.diver.args import args
+from asu.core.diver.config import config as config_diver
 from asu.core.platform.log import my_print as print
 from asu.core.platform.log import print_exc
-import time
+from asu.core.simul.config import config as config_simul
+from asu.core.simul.update_map import update_map
+from asu.ui.common import Page, list_handles, show_snack_bar
 
 
 def choose_view(page: Page):
@@ -56,7 +55,7 @@ def choose_view(page: Page):
         else:
             show_snack_bar(page, "校准失败（⊙.⊙）", ft.colors.RED)
         try:
-            guind = list_handles('AutoSimulatedUniverse')
+            guind = list_handles("AutoSimulatedUniverse")
             win32gui.SetForegroundWindow(guind)
         except:
             pass
@@ -69,7 +68,7 @@ def choose_view(page: Page):
             page.dialog.open = False
             page.update()
         show_snack_bar(page, "开始运行，请切换回游戏（＾∀＾●）", ft.colors.GREEN)
-        if name == 'simul':
+        if name == "simul":
             page.su = run(
                 SimulatedUniverse,
                 1,
@@ -79,7 +78,7 @@ def choose_view(page: Page):
                 int(config_simul.use_consumable),
                 int(config_simul.slow_mode),
                 int(config_simul.max_run),
-                unlock = True,
+                unlock=True,
                 bonus=config_simul.bonus,
                 gui=1,
             )
@@ -89,12 +88,12 @@ def choose_view(page: Page):
                 DivergentUniverse,
                 int(config_diver.debug_mode),
                 int(config_diver.max_run),
-                int(config_diver.speed_mode)
+                int(config_diver.speed_mode),
             )
         run(page.su.start)
         txt = " "
         try:
-            guind = list_handles('AutoSimulatedUniverse')
+            guind = list_handles("AutoSimulatedUniverse")
             win32gui.SetForegroundWindow(guind)
         except:
             pass
@@ -119,7 +118,7 @@ def choose_view(page: Page):
         show_snack_bar(page, msg, col)
 
     def go_config(_e, name):
-        page.go("/config_"+name)
+        page.go("/config_" + name)
 
     def go_about(e=None):
         dlg = ft.AlertDialog(
@@ -138,7 +137,7 @@ def choose_view(page: Page):
             DivergentUniverse,
             int(config_diver.debug_mode),
             int(config_diver.max_run),
-            int(config_diver.speed_mode)
+            int(config_diver.speed_mode),
         )
         run(page.su.screen_test)
         txt = " "
@@ -169,7 +168,9 @@ def choose_view(page: Page):
         time.sleep(3)
         page.dialog.open = False
         page.update()
-        show_snack_bar(page, "稍后解锁限制，赞助页面在右下角按钮~o( =∩ω∩= )m", ft.colors.GREEN)
+        show_snack_bar(
+            page, "稍后解锁限制，赞助页面在右下角按钮~o( =∩ω∩= )m", ft.colors.GREEN
+        )
         time.sleep(7)
         config.unlock = 1
         show_snack_bar(page, "已临时解锁限制o(*￣▽￣*)ブ", ft.colors.GREEN)
@@ -192,7 +193,7 @@ def choose_view(page: Page):
                         ),
                         ft.Container(
                             content=ft.Text(
-                                version+' by CHNZYX',
+                                version + " by CHNZYX",
                                 size=20,
                             ),
                         ),
@@ -248,60 +249,89 @@ def choose_view(page: Page):
                             width=120,
                         ),
                         ft.Container(height=5),
-                        ft.Row([
-                            ft.Column([
-                                ft.Text("模拟宇宙", size=18, weight=ft.FontWeight.W_600, offset=ft.Offset(x=0.3, y=0), color=ft.colors.PINK_600),
-                                ft.Container(),
-                                ft.ElevatedButton(
-                                    content=ft.Row(
-                                        [
-                                            ft.Icon(ft.icons.LOGIN),
-                                            ft.Text("运行", weight=ft.FontWeight.W_600),
-                                        ],
-                                        alignment=ft.MainAxisAlignment.SPACE_AROUND,
-                                    ),
-                                    on_click=lambda e: start(e, 'simul'),
-                                    width=120,
+                        ft.Row(
+                            [
+                                ft.Column(
+                                    [
+                                        ft.Text(
+                                            "模拟宇宙",
+                                            size=18,
+                                            weight=ft.FontWeight.W_600,
+                                            offset=ft.Offset(x=0.3, y=0),
+                                            color=ft.colors.PINK_600,
+                                        ),
+                                        ft.Container(),
+                                        ft.ElevatedButton(
+                                            content=ft.Row(
+                                                [
+                                                    ft.Icon(ft.icons.LOGIN),
+                                                    ft.Text(
+                                                        "运行",
+                                                        weight=ft.FontWeight.W_600,
+                                                    ),
+                                                ],
+                                                alignment=ft.MainAxisAlignment.SPACE_AROUND,
+                                            ),
+                                            on_click=lambda e: start(e, "simul"),
+                                            width=120,
+                                        ),
+                                        ft.ElevatedButton(
+                                            content=ft.Row(
+                                                [
+                                                    ft.Icon(ft.icons.SETTINGS),
+                                                    ft.Text(
+                                                        "设置",
+                                                        weight=ft.FontWeight.W_700,
+                                                    ),
+                                                ],
+                                                alignment=ft.MainAxisAlignment.SPACE_AROUND,
+                                            ),
+                                            on_click=lambda e: go_config(e, "simul"),
+                                            width=120,
+                                        ),
+                                    ]
                                 ),
-                                ft.ElevatedButton(
-                                    content=ft.Row(
-                                        [
-                                            ft.Icon(ft.icons.SETTINGS),
-                                            ft.Text("设置", weight=ft.FontWeight.W_700),
-                                        ],
-                                        alignment=ft.MainAxisAlignment.SPACE_AROUND,
-                                    ),
-                                    on_click=lambda e: go_config(e, 'simul'),
-                                    width=120,
+                                ft.Container(width=100),
+                                ft.Column(
+                                    [
+                                        ft.Text(
+                                            "差分宇宙",
+                                            size=18,
+                                            weight=ft.FontWeight.W_600,
+                                            offset=ft.Offset(x=0.3, y=0),
+                                            color=ft.colors.PINK_600,
+                                        ),
+                                        ft.Container(),
+                                        ft.ElevatedButton(
+                                            content=ft.Row(
+                                                [
+                                                    ft.Icon(ft.icons.LOGIN),
+                                                    ft.Text(
+                                                        "运行",
+                                                        weight=ft.FontWeight.W_600,
+                                                    ),
+                                                ],
+                                                alignment=ft.MainAxisAlignment.SPACE_AROUND,
+                                            ),
+                                            on_click=lambda e: start(e, "diver"),
+                                            width=120,
+                                        ),
+                                        ft.ElevatedButton(
+                                            content=ft.Row(
+                                                [
+                                                    ft.Icon(ft.icons.SETTINGS),
+                                                    ft.Text(
+                                                        "设置",
+                                                        weight=ft.FontWeight.W_700,
+                                                    ),
+                                                ],
+                                                alignment=ft.MainAxisAlignment.SPACE_AROUND,
+                                            ),
+                                            on_click=lambda e: go_config(e, "diver"),
+                                            width=120,
+                                        ),
+                                    ]
                                 ),
-                            ]),
-                            ft.Container(width=100),
-                            ft.Column([
-                                ft.Text("差分宇宙", size=18, weight=ft.FontWeight.W_600, offset=ft.Offset(x=0.3, y=0), color=ft.colors.PINK_600),
-                                ft.Container(),
-                                ft.ElevatedButton(
-                                    content=ft.Row(
-                                        [
-                                            ft.Icon(ft.icons.LOGIN),
-                                            ft.Text("运行", weight=ft.FontWeight.W_600),
-                                        ],
-                                        alignment=ft.MainAxisAlignment.SPACE_AROUND,
-                                    ),
-                                    on_click=lambda e: start(e, 'diver'),
-                                    width=120,
-                                ),
-                                ft.ElevatedButton(
-                                    content=ft.Row(
-                                        [
-                                            ft.Icon(ft.icons.SETTINGS),
-                                            ft.Text("设置", weight=ft.FontWeight.W_700),
-                                        ],
-                                        alignment=ft.MainAxisAlignment.SPACE_AROUND,
-                                    ),
-                                    on_click=lambda e: go_config(e, 'diver'),
-                                    width=120,
-                                ),
-                            ]),
                             ],
                             alignment=MainAxisAlignment.CENTER,
                         ),
@@ -327,5 +357,3 @@ def choose_view(page: Page):
             vertical_alignment=MainAxisAlignment.CENTER,
         )
     )
-
-

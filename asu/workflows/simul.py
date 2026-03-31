@@ -1,26 +1,27 @@
-import threading
-import traceback
-import keyboard
-import pyautogui
-import cv2 as cv
-import numpy as np
-import time
-import win32gui, win32api, win32con
+import datetime
+import os
 import random
 import sys
+import threading
+import time
+import traceback
 from copy import deepcopy
-from asu.core.platform.log import log, set_debug
-from asu.core.simul.map_log import map_log
-from asu.core.simul.update_map import update_map
-from asu.core.simul.utils import UniverseUtils, set_forground, notif
-import os
-from asu.apps.align_angle import main as align_angle
-from asu.core.simul.config import config
-import datetime
-import requests
+
+import cv2 as cv
+import keyboard
+import numpy as np
+import pyautogui
 import pytz
 import pyuac
+import win32gui
+
 import asu.core.simul.keyops as keyops
+from asu.apps.align_angle import main as align_angle
+from asu.core.platform.log import log, set_debug
+from asu.core.simul.config import config
+from asu.core.simul.map_log import map_log
+from asu.core.simul.update_map import update_map
+from asu.core.simul.utils import UniverseUtils, notif, set_forground
 
 # 版本号
 version = "v6.3"
@@ -28,7 +29,18 @@ version = "v6.3"
 
 class SimulatedUniverse(UniverseUtils):
     def __init__(
-        self, find, debug, show_map, speed, consumable, slow, nums=-1, unlock=False, bonus=False, update=0, gui=0
+        self,
+        find,
+        debug,
+        show_map,
+        speed,
+        consumable,
+        slow,
+        nums=-1,
+        unlock=False,
+        bonus=False,
+        update=0,
+        gui=0,
     ):
         super().__init__()
         log.info("当前命途：" + self.fate)
@@ -81,7 +93,7 @@ class SimulatedUniverse(UniverseUtils):
             if os.path.exists(pth):
                 image = cv.imread(pth)
                 self.img_set.append((file, self.extract_features(image)))
-                self.img_map[file]= image
+                self.img_map[file] = image
         log.info("加载地图完成，共 %d 张" % len(self.img_set))
 
     # 初始化地图，刚进图时调用
@@ -138,37 +150,30 @@ class SimulatedUniverse(UniverseUtils):
             if self._stop:
                 break
             self.get_screen()
-            """
-            if begin and not self.check("f", 0.4437,0.4231) and not self.check("abyss/1",0.8568,0.6769):
-                begin = 0
-                self.press("F4")
-                time.sleep(0.6)
-                self.get_screen()
-            """
             res = self.normal()
             # 未匹配到图片，降低匹配阈值，若一直无法匹配则乱点
             if res == 0:
-                if time.time()-self.in_battle>7:
-                    if time.time()-self.in_battle>90 and self.in_battle>0:
-                        self.press('esc')
+                if time.time() - self.in_battle > 7:
+                    if time.time() - self.in_battle > 90 and self.in_battle > 0:
+                        self.press("esc")
                         time.sleep(1)
                         self.in_battle = time.time() - 84 * fp
                         fp = not fp
                         continue
-                    if self.click_text(['点击空白','开始游戏'],click=0):
+                    if self.click_text(["点击空白", "开始游戏"], click=0):
                         self.click((0.2062, 0.1554))
                         time.sleep(0.5)
                     if self.ts.nothing:
                         self.in_battle = time.time()
-                    if time.time()-self.confirm_time>4:
-                        if self.threshold == 0.97 and fail_cnt==0:
+                    if time.time() - self.confirm_time > 4:
+                        if self.threshold == 0.97 and fail_cnt == 0:
                             log.info("匹配不到任何图标")
                             fail_time = time.time()
                         else:
                             time.sleep(0.8)
                         if self.threshold > 0.95:
                             self.threshold -= 0.015
-                        elif time.time()-fail_time>7.5:
+                        elif time.time() - fail_time > 7.5:
                             time.sleep(0.15)
                             if fail_cnt <= 1:
                                 self.click((0.5000, 0.1454))
@@ -193,7 +198,7 @@ class SimulatedUniverse(UniverseUtils):
         self.update_count(0)
         self.my_cnt += 1
         tm = int((time.time() - self.init_tm) / 60)
-        remain_round = self.nums-self.my_cnt
+        remain_round = self.nums - self.my_cnt
         if remain_round > 0:
             remain = int(remain_round * (time.time() - self.init_tm) / self.my_cnt / 60)
         else:
@@ -201,11 +206,16 @@ class SimulatedUniverse(UniverseUtils):
             remain_round = -1
         notif(
             "已完成",
-            f"计数:{self.count} 剩余:{remain_round} 已使用：{tm//60}小时{tm%60}分钟  平均{tm//self.my_cnt}分钟一次  预计剩余{remain//60}小时{remain%60}分钟",
+            f"计数:{self.count} 剩余:{remain_round} 已使用：{tm // 60}小时{tm % 60}分钟  平均{tm // self.my_cnt}分钟一次  预计剩余{remain // 60}小时{remain % 60}分钟",
             cnt=str(self.count),
         )
-        if self.debug == 0 and self.check_bonus == 0 and self.nums <= self.my_cnt and self.nums >= 0:
-            log.info('已完成上限，准备停止运行')
+        if (
+            self.debug == 0
+            and self.check_bonus == 0
+            and self.nums <= self.my_cnt
+            and self.nums >= 0
+        ):
+            log.info("已完成上限，准备停止运行")
             self.end = 1
         self.floor = 0
 
@@ -215,7 +225,8 @@ class SimulatedUniverse(UniverseUtils):
         self.lst_changed = time.time()
         # 战斗界面
         if self.check("c", 0.988, 0.1528, threshold=0.825) or self.check(
-            "auto_2", 0.0583, 0.0769):
+            "auto_2", 0.0583, 0.0769
+        ):
             # 需要打开自动战斗
             if self.check("c", 0.988, 0.1528, threshold=0.825):
                 self.press("v")
@@ -237,7 +248,7 @@ class SimulatedUniverse(UniverseUtils):
             time.sleep(0.3)
             chose = 0
             self.battle = 0
-            if self.check("reset",0.2938,0.0954):
+            if self.check("reset", 0.2938, 0.0954):
                 for _ in range(14):
                     self.get_screen()
                     img_down = self.check("z", 0.5042, 0.3204, mask="mask", large=False)
@@ -252,7 +263,9 @@ class SimulatedUniverse(UniverseUtils):
                     time.sleep(0.2)
                 self.get_screen()
                 img_up = self.check("z", 0.5047, 0.5491, mask="mask_bless", large=False)
-                res_up = self.ts.split_and_find(self.tk.prior_bless, img_up, bless_skip=self.tk.skip)
+                res_up = self.ts.split_and_find(
+                    self.tk.prior_bless, img_up, bless_skip=self.tk.skip
+                )
                 img_down = self.check("z", 0.5042, 0.3204, mask="mask", large=False)
                 res_down = self.ts.split_and_find([self.fate], img_down, mode="bless")
                 if res_up[1] == 2:
@@ -277,7 +290,9 @@ class SimulatedUniverse(UniverseUtils):
                     time.sleep(0.2)
                 self.get_screen()
                 img_up = self.check("z", 0.5047, 0.5491, mask="mask_bless", large=False)
-                res_up = self.ts.split_and_find(self.tk.prior_bless, img_up,bless_skip=self.tk.skip)
+                res_up = self.ts.split_and_find(
+                    self.tk.prior_bless, img_up, bless_skip=self.tk.skip
+                )
                 img_down = self.check("z", 0.5042, 0.3204, mask="mask", large=False)
                 res_down = self.ts.split_and_find(
                     self.tk.secondary, img_down, mode="bless"
@@ -290,8 +305,8 @@ class SimulatedUniverse(UniverseUtils):
                     self.click(self.calc_point((0.5047, 0.5491), res_up[0]))
                 time.sleep(0.4)
             self.click((0.1203, 0.1093))
-            tm=time.time()
-            while time.time()-tm<1.6 and self.check("choose_bless", 0.9266, 0.9491):
+            tm = time.time()
+            while time.time() - tm < 1.6 and self.check("choose_bless", 0.9266, 0.9491):
                 time.sleep(0.1)
                 self.get_screen()
             self.confirm_time = time.time()
@@ -322,27 +337,27 @@ class SimulatedUniverse(UniverseUtils):
                     # 与黑塔交互后30秒内禁止再次交互（防止死循环）
                     if time.time() - self.quit > 30 and self.floor:
                         self.quit = time.time()
-                        self.press('f')
+                        self.press("f")
                         self.battle = 0
                     else:
                         is_killed = 1
                 else:
                     # 传送与离开模拟宇宙相关状态
                     if self.ts.sim("区域"):
-                        log.info(f"识别到传送点")
-                        self.press('f')
+                        log.info("识别到传送点")
+                        self.press("f")
                         return self.nof()
                     elif self.re_align == 1 and self.debug == 0:
                         self.re_align += 1
                     is_killed = text in ["沉浸", "紧锁", "复活", "下载"]
                     if is_killed == 0:
-                        self.press('f')
+                        self.press("f")
                     self.battle = 0
                 if is_killed == 0:
                     return 1
         # 跑图状态
         if self.isrun():
-            if self.speed and not self.quan and self.check("huangquan", 0.0578,0.7083):
+            if self.speed and not self.quan and self.check("huangquan", 0.0578, 0.7083):
                 self.quan = 1
             if self.floor_init == 0:
                 if self.get_level() == -1:
@@ -378,15 +393,20 @@ class SimulatedUniverse(UniverseUtils):
                             if self.now_map_sim < now_map_sim:
                                 self.now_map, self.now_map_sim = now_map, now_map_sim
                             if (
-                                (self.now_map_sim > 0.65 or time.time() - now_time > 2.5)
+                                (
+                                    self.now_map_sim > 0.65
+                                    or time.time() - now_time > 2.5
+                                )
                                 and self.now_map_sim != -1
                             ) or self._stop:
                                 break
                             time.sleep(0.3)
-                        log.info(f"地图编号：{self.now_map}  相似度：{self.now_map_sim}")
+                        log.info(
+                            f"地图编号：{self.now_map}  相似度：{self.now_map_sim}"
+                        )
                         if self.now_map_sim < 0.35:
                             notif("相似度过低", "疑似在黑塔办公室")
-                            if self.debug==2:
+                            if self.debug == 2:
                                 time.sleep(10000)
                         if self.debug == 2:
                             try:
@@ -399,9 +419,12 @@ class SimulatedUniverse(UniverseUtils):
                                     s = fh.readline().strip("\n")
                                 s = eval(s)
                                 self.kl = 0
-                                if not self.now_map in s:
+                                if self.now_map not in s:
                                     s.append(self.now_map)
-                                    notif(f"地图编号：{self.now_map}",f"相似度：{self.now_map_sim}")
+                                    notif(
+                                        f"地图编号：{self.now_map}",
+                                        f"相似度：{self.now_map_sim}",
+                                    )
                                 else:
                                     pass
                                 with open(
@@ -427,7 +450,11 @@ class SimulatedUniverse(UniverseUtils):
                         log.info("target %s" % self.target)
                     if self._stop:
                         return 1
-                    if self.consumable and (self.check_bonus or self.count<34) and self.floor in [3, 7, 12][-self.consumable:]:
+                    if (
+                        self.consumable
+                        and (self.check_bonus or self.count < 34)
+                        and self.floor in [3, 7, 12][-self.consumable :]
+                    ):
                         self.use_consumable(1, 1)
                     self.press("1")
                 # 录制模式，保存初始小地图
@@ -445,12 +472,15 @@ class SimulatedUniverse(UniverseUtils):
                     time.sleep(0.5)
                     self.get_screen()
             self.lst_tm = time.time()
-            
+
             self.kl |= self.floor >= 4 and self.debug == 2
             # 长时间未交互/战斗，暂离或重开
             if (
                 (
-                    (time.time() - self.lst_changed >= 37 - 4 * self.debug + 8 * self.slow)
+                    (
+                        time.time() - self.lst_changed
+                        >= 37 - 4 * self.debug + 8 * self.slow
+                    )
                     and self.find == 1
                 )
                 or (self.floor == 12 and self.mini_state > 4)
@@ -464,15 +494,17 @@ class SimulatedUniverse(UniverseUtils):
                 if self.floor == 12 or self.kl:
                     self.end_of_uni()
                     self.click((0.2708, 0.1324))
-                    log.info(f"通关！当前层数:{self.floor+1}")
+                    log.info(f"通关！当前层数:{self.floor + 1}")
                 elif self.debug == 2:
                     map_log.error(f"地图{self.now_map}出现问题,退出程序")
-                    log.info('地图错误')
+                    log.info("地图错误")
                     notif(f"地图{self.now_map}出现问题,退出程序", "DEBUG")
                     self._stop = 1
                 elif self.fail_count <= 1:
-                    notif("暂离", f"地图{self.now_map}，当前层数:{self.floor+1}")
-                    map_log.error(f"地图{self.now_map}未发现目标,相似度{self.now_map_sim}，尝试暂离")
+                    notif("暂离", f"地图{self.now_map}，当前层数:{self.floor + 1}")
+                    map_log.error(
+                        f"地图{self.now_map}未发现目标,相似度{self.now_map_sim}，尝试暂离"
+                    )
                     self.click((0.2708, 0.2324))
                     self.re_enter()
                     self.re_align += 1
@@ -480,7 +512,9 @@ class SimulatedUniverse(UniverseUtils):
                 else:
                     self.multi = 1.01
                     if self.debug == 0:
-                        notif("中途结算", f"地图{self.now_map}，当前层数:{self.floor+1}")
+                        notif(
+                            "中途结算", f"地图{self.now_map}，当前层数:{self.floor + 1}"
+                        )
                         self.floor = 0
                         self.click((0.2708, 0.1324))
                         map_log.error(
@@ -499,11 +533,16 @@ class SimulatedUniverse(UniverseUtils):
             if self.multi == 1.01:
                 align_angle(0, 1, [1], self)
             self.get_screen()
-            if self.floor > 0 and self.check("ruan",0.0625,0.7065,threshold=0.95) and not self.check("U", 0.0240,0.7759) and not (self.floor==12 and self.mini_state>1):
-                self.press('e')
+            if (
+                self.floor > 0
+                and self.check("ruan", 0.0625, 0.7065, threshold=0.95)
+                and not self.check("U", 0.0240, 0.7759)
+                and not (self.floor == 12 and self.mini_state > 1)
+            ):
+                self.press("e")
                 time.sleep(1.5)
                 self.get_screen()
-                if self.check('e',0.4995,0.7500):
+                if self.check("e", 0.4995, 0.7500):
                     self.solve_snack()
             # 寻路
             if self.mini_state:
@@ -511,21 +550,21 @@ class SimulatedUniverse(UniverseUtils):
             else:
                 self.get_direc()
             return 2
-        elif self.check('e',0.4995,0.7500):
+        elif self.check("e", 0.4995, 0.7500):
             self.solve_snack()
-        elif self.check("init", 0.9120,0.8361):
+        elif self.check("init", 0.9120, 0.8361):
             if self.end:
                 time.sleep(1)
-                self.press('esc')
+                self.press("esc")
                 self._stop = 1
-                log.info('已退出模拟宇宙，自动化结束')
+                log.info("已退出模拟宇宙，自动化结束")
                 return 1
             time.sleep(2)
             self.click((0.3448, 0.4926))
             time.sleep(1)
             self.init_map()
-        elif self.check("begin", 0.3578,0.8046):
-            con = self.check("conti", 0.1422,0.0907)
+        elif self.check("begin", 0.3578, 0.8046):
+            con = self.check("conti", 0.1422, 0.0907)
             if not con:
                 if self.diffi == 5:
                     self.click((0.9375, 0.8565 - 0.3))
@@ -549,10 +588,10 @@ class SimulatedUniverse(UniverseUtils):
                     )
                     time.sleep(0.3)
             self.click((0.1635, 0.1056))
-        elif self.check("fate_2", 0.1182,0.0926):
-            self.click((0.1182,0.0926))
+        elif self.check("fate_2", 0.1182, 0.0926):
+            self.click((0.1182, 0.0926))
             self.confirm_time = time.time()
-        elif self.check("fate", 0.9432,0.9389):
+        elif self.check("fate", 0.9432, 0.9389):
             time.sleep(0.6)
             click_x = [0.02, 0.98]
             n = 4  # 重试次数
@@ -572,7 +611,7 @@ class SimulatedUniverse(UniverseUtils):
                     break
             self.click(self.calc_point((0.4969, 0.3750), res[0]))
         elif self.check("fate_3", 0.9422, 0.9472):
-            if not self.click_text(['2星祝福','奇物']):
+            if not self.click_text(["2星祝福", "奇物"]):
                 self.click((0.5047, 0.4917))
             self.click((0.5062, 0.1065))
             time.sleep(1)
@@ -589,31 +628,34 @@ class SimulatedUniverse(UniverseUtils):
                 tx, ty = self.tx, self.ty
                 try:
                     import yaml
+
                     with open("info.yml", "r", encoding="utf-8", errors="ignore") as f:
                         event_prior = yaml.safe_load(f)["prior"]["事件"]
                 except:
                     event_prior = [
-                        '购买一个',
-                        '丢下雕像',
-                        '和序列扑满玩',
-                        '信仰星神',
-                        '克里珀的恩赐',
-                        '哈克的藏品',
-                        '动作片',
-                        '感恩克里珀星神',
-                        '换取1个星祝福',
-                        '星神的记载',
-                        '翻开牌',
-                        '摧毁黑匣',
-                        '1个1星祝福',
-                        '1个1-星祝福',
-                        '选择里奥'
+                        "购买一个",
+                        "丢下雕像",
+                        "和序列扑满玩",
+                        "信仰星神",
+                        "克里珀的恩赐",
+                        "哈克的藏品",
+                        "动作片",
+                        "感恩克里珀星神",
+                        "换取1个星祝福",
+                        "星神的记载",
+                        "翻开牌",
+                        "摧毁黑匣",
+                        "1个1星祝福",
+                        "1个1-星祝福",
+                        "选择里奥",
                     ]
                 event_prior = [self.fate] + event_prior
-                success = self.click_text(event_prior,env='event')
+                success = self.click_text(event_prior, env="event")
                 time.sleep(0.3)
                 self.get_screen()
-                if success and self.check("confirm", 0.1828, 0.5000, mask="mask_event", threshold=0.965):
+                if success and self.check(
+                    "confirm", 0.1828, 0.5000, mask="mask_event", threshold=0.965
+                ):
                     self.click((self.tx, self.ty))
                 else:
                     self.click((tx, ty))
@@ -636,22 +678,22 @@ class SimulatedUniverse(UniverseUtils):
             res = self.ts.split_and_find(self.tk.strange, img, mode="strange")
             self.click(self.calc_point((0.5000, 0.7333), res[0]))
             self.click((0.1365, 0.1093))
-            self.wait_fig(lambda:self.check("strange", 0.9417, 0.9481), 1.4)
+            self.wait_fig(lambda: self.check("strange", 0.9417, 0.9481), 1.4)
         # 丢弃奇物
         elif self.check("drop", 0.9406, 0.9491):
             self.click((0.4714, 0.5500))
             self.click((0.1339, 0.1028))
-            self.wait_fig(lambda:self.check("drop", 0.9406, 0.9491), 1.4)
+            self.wait_fig(lambda: self.check("drop", 0.9406, 0.9491), 1.4)
         elif self.check("drop_bless", 0.9417, 0.9481, threshold=0.95):
             time.sleep(1.5)
             st = set(self.tk.fates) - set(self.tk.secondary)
             clicked = 0
-            for i,ft in enumerate(self.tk.secondary[::-1]):
+            for i, ft in enumerate(self.tk.secondary[::-1]):
                 if ft != self.fate or i == len(self.tk.secondary):
                     self.get_screen()
                     img_down = self.check("z", 0.5042, 0.3204, mask="mask", large=False)
-                    if self.debug==2:
-                        print(list(st),self.tk.secondary)
+                    if self.debug == 2:
+                        print(list(st), self.tk.secondary)
                     res_down = self.ts.split_and_find(list(st), img_down, mode="bless")
                     if res_down[1] == 2:
                         self.click(self.calc_point((0.5042, 0.3204), res_down[0]))
@@ -680,14 +722,20 @@ class SimulatedUniverse(UniverseUtils):
                 time.sleep(0.3)
                 tm = time.time()
                 self.get_screen()
-                while not self.check("enhance", 0.9208, 0.9380) and time.time()-tm<7:
+                while (
+                    not self.check("enhance", 0.9208, 0.9380) and time.time() - tm < 7
+                ):
                     self.click((0.2062, 0.2054))
                     time.sleep(0.3)
                     self.get_screen()
             self.press("esc")
             self.press("w", 2)
             tm = time.time()
-            while time.time()-tm<2 and not self.check("f", 0.4443, 0.4417, mask="mask_f1", threshold=0.96) and not self.isrun():
+            while (
+                time.time() - tm < 2
+                and not self.check("f", 0.4443, 0.4417, mask="mask_f1", threshold=0.96)
+                and not self.isrun()
+            ):
                 self.get_screen()
                 time.sleep(0.15)
             self.confirm_time = time.time()
@@ -695,7 +743,7 @@ class SimulatedUniverse(UniverseUtils):
             if self.floor >= 12:
                 self.floor = 11
         elif self.check("yes1", 0.5, 0.5, mask="mask_end"):
-            self.click((self.tx,self.ty))
+            self.click((self.tx, self.ty))
             time.sleep(1)
             return 0
         elif self.check("fail", 0.6276, 0.0843):
@@ -837,25 +885,74 @@ class SimulatedUniverse(UniverseUtils):
                         rx += x
                         ry += y
         return (i + rx / rt, j + ry / rt)
-    
+
     def backup_map(self):
         try:
-            self.bbig_map,self.bbig_map_c,self.blst_tm,self.btries,self.bhis_loc,self.boffset,self.bnow_loc,self.bmini_state,self.bang_off,self.bang_neg,self.bfirst_mini=self.big_map,self.big_map_c,self.lst_tm,self.tries,self.his_loc,self.offset,self.now_loc,self.mini_state,self.ang_off,self.ang_neg,self.first_mini
+            (
+                self.bbig_map,
+                self.bbig_map_c,
+                self.blst_tm,
+                self.btries,
+                self.bhis_loc,
+                self.boffset,
+                self.bnow_loc,
+                self.bmini_state,
+                self.bang_off,
+                self.bang_neg,
+                self.bfirst_mini,
+            ) = (
+                self.big_map,
+                self.big_map_c,
+                self.lst_tm,
+                self.tries,
+                self.his_loc,
+                self.offset,
+                self.now_loc,
+                self.mini_state,
+                self.ang_off,
+                self.ang_neg,
+                self.first_mini,
+            )
         except:
             pass
+
     def restore_map(self):
-        self.big_map,self.big_map_c,self.lst_tm,self.tries,self.his_loc,self.offset,self.now_loc,self.mini_state,self.ang_off,self.ang_neg,self.first_mini=self.bbig_map,self.bbig_map_c,self.blst_tm,self.btries,self.bhis_loc,self.boffset,self.bnow_loc,self.bmini_state,self.bang_off,self.bang_neg,self.bfirst_mini
+        (
+            self.big_map,
+            self.big_map_c,
+            self.lst_tm,
+            self.tries,
+            self.his_loc,
+            self.offset,
+            self.now_loc,
+            self.mini_state,
+            self.ang_off,
+            self.ang_neg,
+            self.first_mini,
+        ) = (
+            self.bbig_map,
+            self.bbig_map_c,
+            self.blst_tm,
+            self.btries,
+            self.bhis_loc,
+            self.boffset,
+            self.bnow_loc,
+            self.bmini_state,
+            self.bang_off,
+            self.bang_neg,
+            self.bfirst_mini,
+        )
 
     def re_enter(self):
         tm = time.time()
         while time.time() - tm < 10:
             self.get_screen()
             if self.check("f", 0.4443, 0.4417, mask="mask_f1", threshold=0.96):
-                self.press('f')
+                self.press("f")
                 time.sleep(0.5)
-                self.press('f')
+                self.press("f")
                 time.sleep(0.5)
-                self.press('f')
+                self.press("f")
                 break
 
     def stop(self, *_, **__):
@@ -870,7 +967,7 @@ class SimulatedUniverse(UniverseUtils):
         self._stop = True
         self._stop = 1
         self._stop = True
-    
+
     def on_key_press(self, event):
         global stop_flag
         if event.name == "f8":
@@ -931,7 +1028,7 @@ class SimulatedUniverse(UniverseUtils):
         except KeyboardInterrupt:
             print("KeyboardInterrupt")
             try:
-                log.info('用户终止进程')
+                log.info("用户终止进程")
             except:
                 pass
             if not self._stop:
@@ -948,17 +1045,20 @@ def main():
         slow = config.slow_mode
     if nums == 34:
         nums = config.max_run
-    log.info(f"find: {find}, debug: {debug}, show_map: {show_map}, consumable: {consumable}")
-    su = SimulatedUniverse(find, debug, show_map, speed, consumable, slow, nums, bonus=bonus, update=update)
+    log.info(
+        f"find: {find}, debug: {debug}, show_map: {show_map}, consumable: {consumable}"
+    )
+    su = SimulatedUniverse(
+        find, debug, show_map, speed, consumable, slow, nums, bonus=bonus, update=update
+    )
     try:
         su.start()
-    except ValueError as e:
+    except ValueError:
         pass
     except Exception:
         traceback.print_exc()
     finally:
         su.stop()
-
 
 
 def run():
@@ -985,7 +1085,3 @@ def run():
 
 if __name__ == "__main__":
     run()
-
-
-
-

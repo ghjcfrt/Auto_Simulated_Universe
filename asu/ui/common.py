@@ -36,17 +36,15 @@ def enum_windows_callback(hwnd, hwnds, name):
     class_name = win32gui.GetClassName(hwnd)
     window_name = win32gui.GetWindowText(hwnd)
     try:
-        if (
-            name == window_name
-        ):
+        if name == window_name:
             hwnds.append(hwnd)
     except:
         pass
     return True
 
 
-def list_handles(name='AutoSimulatedUniverse'):
+def list_handles(name="AutoSimulatedUniverse"):
     hwnds = []
-    win32gui.EnumWindows(lambda a,b:enum_windows_callback(a,b,name=name), hwnds)
+    win32gui.EnumWindows(lambda a, b: enum_windows_callback(a, b, name=name), hwnds)
     hwnds.append(0)
     return hwnds[0]

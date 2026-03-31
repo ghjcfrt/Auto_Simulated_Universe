@@ -1,16 +1,16 @@
 import atexit
+import os
+import shutil
+import sys
+import threading
+
 import flet as ft
 import pyuac
-import threading
-import os, time
-import sys
-import psutil
-import shutil
 
 from asu.ui.choose import choose_view
-from asu.ui.config_simul import config_view as config_view_simul
-from asu.ui.config_diver import config_view as config_view_diver
 from asu.ui.common import Page, init_page
+from asu.ui.config_diver import config_view as config_view_diver
+from asu.ui.config_simul import config_view as config_view_simul
 
 
 def main(page: Page):
@@ -28,7 +28,6 @@ def main(page: Page):
         top_view = page.views[-1]
         page.go(top_view.route)
 
-
     init_page(page)
     page.theme = ft.Theme(
         color_scheme_seed=ft.colors.PINK,
@@ -44,8 +43,10 @@ def main(page: Page):
     page.window_min_height = 650
     page.go(page.route)
 
+
 def cleanup():
     os._exit(0)
+
 
 def clean_temp_files():
     try:
@@ -56,17 +57,29 @@ def clean_temp_files():
     parent_dir = os.path.dirname(now_dir)
     for file in os.listdir(parent_dir):
         file_path = os.path.join(parent_dir, file)
-        if os.path.basename(now_dir) != file and os.path.isdir(file_path) and file.startswith('_MEI'):
+        if (
+            os.path.basename(now_dir) != file
+            and os.path.isdir(file_path)
+            and file.startswith("_MEI")
+        ):
             files_list = os.listdir(file_path)
-            if 'utils' not in files_list or 'flet' not in files_list or 'win32' not in files_list:
+            if (
+                "utils" not in files_list
+                or "flet" not in files_list
+                or "win32" not in files_list
+            ):
                 continue
-            utils_path = os.path.join(file_path, 'utils')
+            utils_path = os.path.join(file_path, "utils")
             utils_list = os.listdir(utils_path)
-            if 'models' not in utils_list:
+            if "models" not in utils_list:
                 continue
-            models_path = os.path.join(utils_path, 'models')
+            models_path = os.path.join(utils_path, "models")
             models_list = os.listdir(models_path)
-            if 'ppocr_keys_v1.txt' not in models_list or 'v3_det.onnx' not in models_list or 'v4_rec.onnx' not in models_list:
+            if (
+                "ppocr_keys_v1.txt" not in models_list
+                or "v3_det.onnx" not in models_list
+                or "v4_rec.onnx" not in models_list
+            ):
                 continue
             try:
                 shutil.rmtree(file_path, ignore_errors=True)
@@ -86,4 +99,3 @@ def run():
 
 if __name__ == "__main__":
     run()
-

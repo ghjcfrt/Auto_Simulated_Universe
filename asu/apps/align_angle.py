@@ -6,7 +6,7 @@ import win32api
 import win32con
 import win32gui
 import pyuac
-from utils.log import log
+from asu.core.platform.log import log
 
 
 def get_angle(su, safe):
@@ -23,15 +23,15 @@ def get_angle(su, safe):
 # 基本逻辑：每次转60度，然后计算实际转了几度，计算出误差比
 def main(cnt=10, safe=0, ang=[1,1,3], su=None):
     if su is None or 'Diver' in su.__class__.__name__:
-        from utils.diver.config import config
+        from asu.core.diver.config import config
     else:
-        from utils.simul.config import config
+        from asu.core.simul.config import config
     if float(config.angle)>2 and len(ang)<3 and su is not None:
         su.multi = config.multi
         return
     log.info("开始校准")
     if su is None:
-        from utils.simul.utils import UniverseUtils
+        from asu.core.simul.utils import UniverseUtils
         su = UniverseUtils()
     su.multi = 1
     init_ang = get_angle(su, safe)
@@ -68,7 +68,7 @@ def main(cnt=10, safe=0, ang=[1,1,3], su=None):
     config.angle = str(su.multi+len(ang)-1)
     config.save()
     if su is None:
-        from utils.simul.config import config
+        from asu.core.simul.config import config
         config.angle = str(su.multi+len(ang)-1)
         config.save()
     log.info("校准完成")
@@ -85,3 +85,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+

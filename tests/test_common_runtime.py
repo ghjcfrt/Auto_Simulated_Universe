@@ -9,7 +9,7 @@ from unittest import mock
 from tests._platform_stubs import install_platform_stubs
 
 install_platform_stubs()
-runtime = importlib.import_module("utils.common.runtime")
+runtime = importlib.import_module("asu.core.common.runtime")
 
 
 @contextmanager
@@ -82,3 +82,4 @@ class RuntimeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

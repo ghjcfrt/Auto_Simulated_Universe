@@ -5,9 +5,9 @@ import time
 import win32gui
 import random
 import sys
-from utils.log import log
-from utils.simul.utils import UniverseUtils, set_forground
-import utils.simul.keyops as keyops
+from asu.core.platform.log import log
+from asu.core.simul.utils import UniverseUtils, set_forground
+import asu.core.simul.keyops as keyops
 import os
 import yaml
 import pyuac
@@ -188,3 +188,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+

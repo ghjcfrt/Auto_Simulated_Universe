@@ -1,24 +1,27 @@
 # Project Structure
 
 ## Goals
-- Keep the original CLI commands unchanged.
-- Move large app entry scripts out of the repository root.
-- Make future module extraction easier.
+- Keep entry commands simple and obvious.
+- Make source layout readable at a glance.
+- Separate app orchestration, domain logic, UI, OCR, and assets.
 
 ## Current Layout
-- `diver.py` / `simul.py` / `abyss.py` / `gui.py` / `align_angle.py` / `notif.py`: compatibility entry files.
-- `asu/apps/`: real application entry modules.
-- `utils/`: shared automation, OCR, GUI helper, and config modules.
-- `utils/onnxocr/`: third-party OCR code boundary (marked by `THIRD_PARTY.md` and `.third_party`).
-- `utils/common/runtime.py`: shared runtime functions (`notif`, `set_forground`).
-- `utils/common/window.py`: shared game-window initialization logic.
-- `utils/common/interaction.py`: shared coordinate and mouse interaction helpers.
-- `actions/`, `imgs/`, `utils/models/`: runtime assets and model files.
-- `utils/diver/constants.py` / `utils/simul/constants.py`: extracted config constants and defaults.
+- `diver.py` / `simul.py` / `abyss.py` / `gui.py` / `align_angle.py` / `notif.py`: thin compatibility entry files.
+- `asu/apps/`: thin compatibility entry modules.
+- `asu/workflows/`: large workflow implementations (`diver`, `simul`).
+- `asu/core/common/`: shared runtime, window state, and interaction helpers.
+- `asu/core/diver/`: 差分宇宙 domain logic and configuration.
+- `asu/core/simul/`: 模拟宇宙 domain logic and configuration.
+- `asu/core/platform/`: platform-facing helpers (`log.py`, `screenshot.py`).
+- `asu/ui/`: GUI layer (Flet views and page helpers).
+- `asu/onnxocr/`: third-party OCR boundary.
+- `asu/assets/models/`: OCR model assets.
+- `actions/`, `imgs/`: runtime action tables and image assets.
 
 ## Rules For New Code
-- Put new top-level app flows in `asu/apps/`.
-- Keep repository-root python files as thin wrappers only.
-- Put reusable business logic under `utils/` subpackages.
-- Keep large static tables and default configs in dedicated `constants.py` modules.
-- Keep `utils/onnxocr/` as third-party code; avoid mixing product logic into this directory.
+- Put new large flow implementations in `asu/workflows/`, and keep `asu/apps/` thin.
+- Keep repository-root python files as wrappers only.
+- Keep reusable core logic under `asu/core/`.
+- Keep UI code in `asu/ui/` and avoid mixing business logic into UI modules.
+- Keep OCR vendor code inside `asu/onnxocr/` and business logic outside of it.
+- Keep large constant tables in dedicated `constants.py` files in each domain package.

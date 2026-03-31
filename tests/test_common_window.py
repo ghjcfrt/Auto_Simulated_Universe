@@ -6,7 +6,7 @@ from unittest import mock
 from tests._platform_stubs import install_platform_stubs
 
 install_platform_stubs()
-window = importlib.import_module("utils.common.window")
+window = importlib.import_module("asu.core.common.window")
 
 
 class WindowTests(unittest.TestCase):
@@ -76,3 +76,4 @@ class WindowTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

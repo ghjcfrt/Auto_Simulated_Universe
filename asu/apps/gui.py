@@ -7,11 +7,11 @@ import sys
 import psutil
 import shutil
 
-from utils.gui.choose import choose_view
-from utils.gui.config_simul import config_view as config_view_simul
-from utils.gui.config_diver import config_view as config_view_diver
-from utils.gui.abyss import abyss_view
-from utils.gui.common import Page, init_page
+from asu.ui.choose import choose_view
+from asu.ui.config_simul import config_view as config_view_simul
+from asu.ui.config_diver import config_view as config_view_diver
+from asu.ui.abyss import abyss_view
+from asu.ui.common import Page, init_page
 
 
 def main(page: Page):
@@ -89,3 +89,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+

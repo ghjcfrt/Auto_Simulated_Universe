@@ -13,7 +13,7 @@ except ModuleNotFoundError:
     HAS_NUMPY = False
 
 install_platform_stubs()
-interaction = importlib.import_module("utils.common.interaction") if HAS_NUMPY else None
+interaction = importlib.import_module("asu.core.common.interaction") if HAS_NUMPY else None
 
 
 @unittest.skipUnless(HAS_NUMPY, "缺少 numpy，跳过 interaction 回归测试")
@@ -71,3 +71,4 @@ class InteractionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

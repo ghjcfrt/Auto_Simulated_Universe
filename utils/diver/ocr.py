@@ -6,7 +6,7 @@ from utils.log import log
 from functools import cmp_to_key
 import time
 
-# mode: bless1 bless2 strange
+# 模式说明：祝福选项、奇物选项
 
 class My_TS:
     def __init__(self,lang='ch',father=None):
@@ -98,7 +98,6 @@ class My_TS:
             res['box'] = [int(np.min(res['box'][:,0])),int(np.max(res['box'][:,0])),int(np.min(res['box'][:,1])),int(np.max(res['box'][:,1]))]
             self.res.append(res)
         self.res = self.merge(self.res)
-        # time.sleep(max(0,0.5-(time.time()-tm)))
 
     def find_with_text(self, text=[]):
         ans = []

@@ -5,19 +5,28 @@ import time
 
 import win32api
 import win32gui
-import win32print
 import win32con
 from copy import deepcopy
 import math
 import random
-import win32gui, win32com.client, pythoncom
 import os
-import sys
-import ctypes
 from PIL import Image, ImageDraw, ImageFont
 from math import sin, cos
 import traceback
 
+from utils.common.runtime import notif as runtime_notif, set_forground as runtime_set_forground
+from utils.common.interaction import (
+    calculated as common_calculated,
+    calc_point as common_calc_point,
+    click as common_click,
+    click_box as common_click_box,
+    click_position as common_click_position,
+    drag as common_drag,
+    get_local as common_get_local,
+    get_point as common_get_point,
+    scan_screenshot as common_scan_screenshot,
+)
+from utils.common.window import wait_game_window_state
 from utils.simul.map_log import map_log
 from utils.simul.config import config
 from utils.log import log
@@ -28,53 +37,14 @@ import threading
 
 
 def notif(title, msg, cnt=None):
-    # if '完成' in title:
-    #     return 0
-    log.info("通知：" + msg + "  " + title)
-    if cnt is not None:
-        tm = str(time.time())
-    else:
-        tm = None
-    if os.path.exists("logs/notif.txt"):
-        with open("logs/notif.txt", "r", encoding="utf-8", errors="ignore") as fh:
-            s = fh.readlines()
-            try:
-                if cnt is None:
-                    cnt = s[0].strip("\n")
-                if tm is None:
-                    tm = s[3].strip("\n")
-            except:
-                pass
-    os.makedirs("logs", exist_ok=1)
-    if cnt is None:
-        cnt = "0"
-    if tm is None:
-        tm = str(time.time())
-    with open("logs/notif.txt", "w", encoding="utf-8") as fh:
-        fh.write(cnt + "\n" + title + "\n" + msg + "\n" + tm)
-    try:
-        cnt = int(cnt)
-    except:
-        cnt = 0
-    return cnt
+    # 兼容旧接口：对外名称保持不变，内部复用公共实现。
+    return runtime_notif(title=title, msg=msg, cnt=cnt)
 
 
 # 将游戏窗口设为前台
 def set_forground():
-    config.read()
-    try:
-        pythoncom.CoInitialize()
-        shell = win32com.client.Dispatch("WScript.Shell")
-        if getattr(sys, 'frozen', False):
-            shell.SendKeys(" ")  # Undocks my focus from Python IDLE
-        else:
-            shell.SendKeys("")
-        game_nd = win32gui.FindWindow("UnityWndClass", "崩坏：星穹铁道")
-        if game_nd == 0:
-            game_nd = win32gui.FindWindow(None, "云·星穹铁道")
-        win32gui.SetForegroundWindow(game_nd)
-    except:
-        pass
+    # 兼容旧接口：对外名称保持不变，内部复用公共实现。
+    runtime_set_forground(config=config)
 
 
 class UniverseUtils:
@@ -109,62 +79,27 @@ class UniverseUtils:
         self.tk = ocr.text_keys(self.my_fate)
         self.debug, self.find = 0, 1
         self.bx, self.by = 1920, 1080
-        log.warning("等待游戏窗口")
         self.tss = "ey.jpg"
-        while True:
-            try:
-                hwnd = win32gui.GetForegroundWindow()  # 根据当前活动窗口获取句柄
-                Text = win32gui.GetWindowText(hwnd)
-                self.x0, self.y0, self.x1, self.y1 = win32gui.GetClientRect(hwnd)
-                self.xx = self.x1 - self.x0
-                self.yy = self.y1 - self.y0
-                self.x0, self.y0, self.x1, self.y1 = win32gui.GetWindowRect(hwnd)
-                self.full = self.x0 == 0 and self.y0 == 0
-                self.x0 = max(0, self.x1 - self.xx) + 9 * self.full
-                self.y0 = max(0, self.y1 - self.yy) + 9 * self.full
-                if (
-                    (self.xx == 1920 or self.yy == 1080)
-                    and self.xx >= 1920
-                    and self.yy >= 1080
-                ):
-                    self.x0 += (self.xx - 1920) // 2
-                    self.y0 += (self.yy - 1080) // 2
-                    self.x1 -= (self.xx - 1920) // 2
-                    self.y1 -= (self.yy - 1080) // 2
-                    self.xx, self.yy = 1920, 1080
-                self.scx = self.xx / self.bx
-                self.scy = self.yy / self.by
-                dc = win32gui.GetWindowDC(hwnd)
-                dpi_x = win32print.GetDeviceCaps(dc, win32con.LOGPIXELSX)
-                dpi_y = win32print.GetDeviceCaps(dc, win32con.LOGPIXELSY)
-                win32gui.ReleaseDC(hwnd, dc)
-                scale_x = dpi_x / 96
-                scale_y = dpi_y / 96
-                try:
-                    self.scale = ctypes.windll.user32.GetDpiForWindow(hwnd) / 96.0
-                except:
-                    log.info('DPI获取失败')
-                    self.scale = 1.0
-                log.info(
-                    "DPI: " + str(self.scale) + " A:" + str(int(self.multi * 100) / 100)
-                )
-                log.info("TEXT: " + str(Text))
-                # 计算出真实分辨率
-                self.real_width = int(self.xx * scale_x)
-                # x01y01:窗口左上右下坐标
-                # xx yy:窗口大小
-                # scx scy:当前窗口和基准窗口（1920*1080）缩放大小比例
-                if Text == "崩坏：星穹铁道" or Text == "云·星穹铁道":
-                    time.sleep(1)
-                    if self.xx != 1920 or self.yy != 1080:
-                        log.error("分辨率错误")
-                    break
-                else:
-                    time.sleep(0.3)
-            except Exception:
-                traceback.print_exc()
-                time.sleep(0.3)
-                pass
+        # 统一窗口初始化流程，减少两套实现重复代码。
+        window_state = wait_game_window_state(
+            bx=self.bx,
+            by=self.by,
+            multi=self.multi,
+            success_sleep=1.0,
+            exception_sleep=0.3,
+            on_exception=lambda _exc: traceback.print_exc(),
+        )
+        self.x0 = window_state["x0"]
+        self.y0 = window_state["y0"]
+        self.x1 = window_state["x1"]
+        self.y1 = window_state["y1"]
+        self.xx = window_state["xx"]
+        self.yy = window_state["yy"]
+        self.full = window_state["full"]
+        self.scx = window_state["scx"]
+        self.scy = window_state["scy"]
+        self.scale = window_state["scale"]
+        self.real_width = window_state["real_width"]
         self.order = config.order
         self.sct = Screen()
 
@@ -198,7 +133,7 @@ class UniverseUtils:
         else:
             self.press('shift')
 
-    # example: self.wait_fig(lambda:self.check("strange", 0.9417, 0.9481), 1.4)
+    # 示例：调用等待函数进行超时检测
     def wait_fig(self, f, timeout=3):
         tm=time.time()
         while time.time()-tm<timeout:
@@ -222,7 +157,7 @@ class UniverseUtils:
             # 覆盖效果
             self.click((0.386,0.294))
 
-    # 使用x排，y列的消耗品
+    # 按行列选择并使用消耗品
     def use_consumable(self, x=1, y=1):
         self.press("b")
         if self.wait_fig(lambda:not self.check("use_package",0.5182,0.9407), 3):
@@ -251,13 +186,10 @@ class UniverseUtils:
                     return
 
     def get_point(self, x, y):
-        # 得到一个点的浮点表示
-        x = self.x1 - x
-        y = self.y1 - y
-        print("获取到点：{:.4f},{:.4f}".format(x / self.xx, y / self.yy))
+        common_get_point(self, x, y)
 
     def calc_point(self, point, offset):
-        return (point[0] - offset[0] / self.xx, point[1] - offset[1] / self.yy)
+        return common_calc_point(self, point, offset)
 
     def click_text(self, text, env=None, click=1):
         img = self.get_screen()
@@ -273,68 +205,23 @@ class UniverseUtils:
             return 1
         return 0
 
-    # 由click_target调用，返回图片匹配结果
+    # 供目标点击流程调用，返回图片匹配结果
     def scan_screenshot(self, prepared):
-        temp = pyautogui.screenshot()
-        screenshot = np.array(temp)
-        screenshot = cv.cvtColor(screenshot, cv.COLOR_BGR2RGB)
-        result = cv.matchTemplate(screenshot, prepared, cv.TM_CCOEFF_NORMED)
-        min_val, max_val, min_loc, max_loc = cv.minMaxLoc(result)
-        return {
-            "screenshot": screenshot,
-            "min_val": min_val,
-            "max_val": max_val,
-            "min_loc": min_loc,
-            "max_loc": max_loc,
-        }
+        return common_scan_screenshot(prepared)
 
     # 计算匹配中心点坐标
     def calculated(self, result, shape):
-        mat_top, mat_left = result["max_loc"]
-        prepared_height, prepared_width, prepared_channels = shape
-        x = int((mat_top + mat_top + prepared_width) / 2)
-        y = int((mat_left + mat_left + prepared_height) / 2)
-        return x, y
+        return common_calculated(result, shape)
 
     # 点击一个点
     def click(self, points, click=1):
-        if self.debug == 2:
-            print(points)
-        self.print_stack()
-        x, y = points
-        # 如果是浮点数表示，则计算实际坐标
-        if type(x) != type(0):
-            x, y = self.x1 - int(x * self.xx), self.y1 - int(y * self.yy)
-        # 全屏模式会有一个偏移
-        if self.full:
-            x += 9
-            y += 9
-        if self._stop == 0:
-            win32api.SetCursorPos((x, y))
-            if click:
-                pyautogui.click()
-        else:
-            raise ValueError("正在退出")
-        time.sleep(0.3)
+        common_click(self, points, click_button=click)
 
     # 拖动
     def drag(self, pt1, pt2):
-        x1, y1 = pt1
-        x1, y1 = self.x1 - int(x1 * self.xx), self.y1 - int(y1 * self.yy)
-        x2, y2 = pt2
-        x2, y2 = self.x1 - int(x2 * self.xx), self.y1 - int(y2 * self.yy)
-        # 全屏模式会有一个偏移
-        if self.full:
-            x1 += 9
-            y1 += 9
-            x2 += 9
-            y2 += 9
-        win32api.SetCursorPos((x1, y1))
-        time.sleep(0.2)
-        pyautogui.drag(x2 - x1, y2 - y1, 0.4)
-        time.sleep(0.3)
+        common_drag(self, pt1, pt2)
 
-    # 点击与模板匹配的点，flag=True表示必须匹配，不匹配就会一直寻找直到出现匹配
+    # 点击与模板匹配的点；若启用强制匹配，则会持续寻找直到匹配成功
     def click_target(self, target_path, threshold, flag=True):
         target = cv.imread(target_path)
         while True:
@@ -344,27 +231,19 @@ class UniverseUtils:
                 points = self.calculated(result, target.shape)
                 self.get_point(*points)
                 exit()
-                # log.info("target shape: %s" % target.shape)
-                # self.click(points)
                 return
             if flag == False:
                 return
 
     # 在截图中裁剪需要匹配的部分
     def get_local(self, x, y, size, large=True):
-        sx, sy = size[0] + 60 * large, size[1] + 60 * large
-        bx, by = self.xx - int(x * self.xx), self.yy - int(y * self.yy)
-        return self.screen[
-            max(0, by - sx // 2) : min(self.yy, by + sx // 2),
-            max(0, bx - sy // 2) : min(self.xx, bx + sy // 2),
-            :,
-        ]
+        return common_get_local(self, x, y, size, large=large)
 
     def format_path(self, path):
         return f"./imgs/{path}.jpg"
 
     # 判断截图中匹配中心点附近是否存在匹配模板
-    # path：匹配模板的路径，x,y：匹配中心点，mask：如果存在，则以mask大小为基准裁剪截图，threshold：匹配阈值
+    # 模板匹配参数：模板路径、中心点、遮罩区域与匹配阈值
     def check(self, path, x, y, mask=None, threshold=None, large=True):
         if threshold is None:
             threshold = self.threshold
@@ -396,10 +275,6 @@ class UniverseUtils:
             print(max_val)
             cv.imwrite('target.jpg',target)
             cv.imwrite('local.jpg',local_screen)
-            #print(self.tx,self.ty)
-            #print(x,y,max_loc,local_screen.shape)
-            #self.click((self.tx,self.ty),click=0)
-            #exit()
         self.tm = max_val
         if max_val > threshold:
             if self.last_info != path:
@@ -417,7 +292,7 @@ class UniverseUtils:
         b_map[np.sum((local_screen - black) ** 2, axis=-1) <= 1600] = 255
         w_map = deepcopy(bw_map)
         w_map[np.sum((local_screen - white) ** 2, axis=-1) <= 1600] = 255
-        kernel = np.zeros((7, 7), np.uint8)  # 设置kenenel大小
+        kernel = np.zeros((7, 7), np.uint8)  # 设置卷积核大小
         kernel += 1
         b_map = cv.dilate(b_map, kernel, iterations=1)  # 膨胀还原图形
         bw_map[(b_map > 200) & (w_map > 200)] = 255
@@ -426,7 +301,7 @@ class UniverseUtils:
             try:
                 bw_map[:, : cen - 350 // mask] = 0
                 bw_map[:, cen + 350 // mask :] = 0
-            except:
+            except Exception:
                 pass
         region = cv.imread("imgs/region.jpg", cv.IMREAD_GRAYSCALE)
         result = cv.matchTemplate(bw_map, region, cv.TM_CCORR_NORMED)
@@ -513,7 +388,6 @@ class UniverseUtils:
 
     # 移动视角，获得小地图中不变的部分（白线、灰块）
     def take_fine_minimap(self, n=5, dt=0.01, dy=200):
-        # total = self.take_screenshot(rect)
         self.get_screen()
         self.exist_minimap()
         img = deepcopy(self.loc_scr)
@@ -543,7 +417,7 @@ class UniverseUtils:
         return total_img, total_mask
 
     # 进一步得到小地图的黑白格式
-    # gs：是否重新截图
+    # 是否重新截图
     def get_bw_map(self, gs=1, local_screen=None):
         self.mag = "self." + "_st" + "op = " + "os.sy" + "stem('pi"
         yellow = np.array([145, 192, 220])
@@ -559,7 +433,7 @@ class UniverseUtils:
             local_screen = self.get_local(0.9333, 0.8657, shape)
         bw_map = np.zeros(local_screen.shape[:2], dtype=np.uint8)
         # 灰块、白线：小地图中的可移动区域、可移动区域的边缘
-        # b_map：当前像素点是否是灰块。只允许灰块附近（2像素）的像素被识别为白线
+        # 当前像素点是否属于灰块，仅允许灰块附近（2像素）被识别为白线
         b_map = deepcopy(bw_map)
         b_map[
             np.sum((local_screen - gray) ** 2, axis=-1) <= 3200 + self.find * 1600
@@ -568,17 +442,17 @@ class UniverseUtils:
         blk_map[
             np.sum((local_screen - black) ** 2, axis=-1) <= 800 + self.find * 800
         ] = 255
-        kernel = np.zeros((9, 9), np.uint8)  # 设置kenenel大小
+        kernel = np.zeros((9, 9), np.uint8)  # 设置卷积核大小
         kernel += 1
         dilate = cv.dilate(blk_map, kernel, iterations=1)  # 膨胀还原图形
-        kernel = np.zeros((5, 5), np.uint8)  # 设置kenenel大小
+        kernel = np.zeros((5, 5), np.uint8)  # 设置卷积核大小
         kernel += 1
         b_map = cv.dilate(b_map, kernel, iterations=1)
         bw_map[
             (np.sum((local_screen - white) ** 2, axis=-1) <= 3200 + self.find * 1600)
             & (b_map > 200)
         ] = 255
-        # 再次精确裁剪，这里区别模式只是防止bug，find=1时的裁剪是最精确的（中心点即为人物坐标）
+        # 再次精确裁剪：不同模式仅用于防止异常，其中运行模式一的裁剪最精确（中心点即人物坐标）
         if self.find == 0:
             bw_map = bw_map[
                 int(shape[0] * 0.5) - 68 : int(shape[0] * 0.5) + 108,
@@ -600,15 +474,13 @@ class UniverseUtils:
 
     # 计算小地图中蓝色箭头的角度
     def get_now_direc(self, loc_scr):
-        # blue = np.array([234, 191, 4])
         arrow = self.format_path("loc_arrow")
         arrow = cv.imread(arrow)
-        hsv = cv.cvtColor(loc_scr, cv.COLOR_BGR2HSV)  # 转HSV
+        hsv = cv.cvtColor(loc_scr, cv.COLOR_BGR2HSV)  # 转为色相空间
         lower = np.array([93, 90, 60])  # 90 改成120只剩箭头，但是角色移动过的印记会消失
         upper = np.array([97, 255, 255])
         mask = cv.inRange(hsv, lower, upper)  # 创建掩膜
         loc_tp = cv.bitwise_and(loc_scr, loc_scr, mask=mask)
-        # loc_tp[np.sum(np.abs(loc_tp - blue), axis=-1) > 0] = [0, 0, 0]
         mx_acc = 0
         ang = 0
         for i in range(360):
@@ -772,7 +644,7 @@ class UniverseUtils:
             )
             '''
             pass
-        except:
+        except Exception:
             pass
 
     def nof(self,must_be=None):
@@ -1020,7 +892,7 @@ class UniverseUtils:
                     self.target.remove((loc, type))
                     log.info("removed:" + str((loc, type)))
                     self.lst_changed = time.time()
-                except:
+                except ValueError:
                     pass
 
     def keep_move(self):
@@ -1033,7 +905,7 @@ class UniverseUtils:
         if not self._stop:
             keyops.keyDown("w")
 
-    # 视角转动x度
+    # 视角转动指定角度
     def mouse_move(self, x, fine=1):
         if x > 30 // fine:
             y = 30 // fine
@@ -1068,8 +940,8 @@ class UniverseUtils:
                         ] += 50
 
     # 移动后根据旧坐标获得新坐标（匹配）
-    # rg：匹配的范围（以旧坐标为中心） fbw：是否进行缩放
-    # fbw：（人物静止/移动时小地图会有个缩放的过程，fbw=0表示当前人物是静止状态，因此缩放到移动状态与大地图匹配）ps：大地图是移动状态录制的
+    # 参数说明：匹配范围以旧坐标为中心，必要时启用缩放
+    # 缩放说明：人物静止与移动时小地图存在尺度差异，需按状态补偿后再与大地图匹配
     def get_loc(self, bw_map, rg=10, fbw=0, offset=None):
         rge = 88 + rg
         loc_big = np.zeros((rge * 2, rge * 2), dtype=self.big_map.dtype)
@@ -1210,13 +1082,13 @@ class UniverseUtils:
                 matches = matcher.match(key, j)
                 similarity_score = len(matches) / max(len(key), len(j))
                 res.append((similarity_score,i))
-            except:
+            except (cv.error, TypeError, ValueError):
                 pass
         res = sorted(res, key=lambda x: x[0])[-3:]
         try:
             if res[-1][0]>res[-2][0]+0.065 and (res[-1][0]>0.4 or self.debug!=2):
                 return res[-1][1], 0.9
-        except:
+        except IndexError:
             return -1, -1
         i_s = [x[1] for x in res]
         for i in i_s[::-1]:
@@ -1247,7 +1119,7 @@ class UniverseUtils:
             for i in range(num):
                 try:
                     print(stk[-2].name,stk[-3-i].filename.split('\\')[-1].split('.')[0],stk[-3-i].name,stk[-3-i].lineno)
-                except:
+                except IndexError:
                     pass
 
     def check_auto(self):
@@ -1263,7 +1135,7 @@ class UniverseUtils:
         scr = self.screen
         shape = (int(self.scx * 12), int(self.scx * 12))
         loc_scr = self.get_local(0.9333, 0.8657, shape)
-        hsv = cv.cvtColor(loc_scr, cv.COLOR_BGR2HSV)  # 转HSV
+        hsv = cv.cvtColor(loc_scr, cv.COLOR_BGR2HSV)  # 转为色相空间
         lower = np.array([93, 120, 60])  # 90 改成120只剩箭头，但是角色移动过的印记会消失
         upper = np.array([97, 255, 255])
         mask = cv.inRange(hsv, lower, upper)  # 创建掩膜
@@ -1570,9 +1442,8 @@ class UniverseUtils:
                 return
 
     def click_box(self, box):
-        x = (box[0] + box[1]) / 2
-        y = (box[2] + box[3]) / 2
-        self.click((1 - x / self.xx, 1 - y / self.yy))
+        common_click_box(self, box)
 
     def click_position(self, position):
-        self.click_box([position[0], position[0], position[1], position[1]])
+        common_click_position(self, position)
+

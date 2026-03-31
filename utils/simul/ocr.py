@@ -3,7 +3,7 @@ import numpy as np
 import cv2 as cv
 from utils.log import log
 
-# mode: bless1 bless2 strange
+# 模式说明：祝福选项、奇物选项
 
 class My_TS:
     def __init__(self,lang='ch'):
@@ -189,3 +189,5 @@ class text_keys:
                 self.skip = 0
         self.strange = [self.fates[self.fate]+'火漆'] + self.strange
         self.secondary = [self.fates[self.fate]] + self.secondary
+
+

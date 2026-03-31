@@ -1,5 +1,6 @@
 import onnxruntime
 
+
 class PredictBase(object):
     def __init__(self, cpu=False):
         self.cpu = cpu
@@ -16,34 +17,21 @@ class PredictBase(object):
 
 
     def get_output_name(self, onnx_session):
-        """
-        output_name = onnx_session.get_outputs()[0].name
-        :param onnx_session:
-        :return:
-        """
+        """获取模型输出节点名称列表。"""
         output_name = []
         for node in onnx_session.get_outputs():
             output_name.append(node.name)
         return output_name
 
     def get_input_name(self, onnx_session):
-        """
-        input_name = onnx_session.get_inputs()[0].name
-        :param onnx_session:
-        :return:
-        """
+        """获取模型输入节点名称列表。"""
         input_name = []
         for node in onnx_session.get_inputs():
             input_name.append(node.name)
         return input_name
 
     def get_input_feed(self, input_name, image_numpy):
-        """
-        input_feed={self.input_name: image_numpy}
-        :param input_name:
-        :param image_numpy:
-        :return:
-        """
+        """按输入名组装推理输入字典。"""
         input_feed = {}
         for name in input_name:
             input_feed[name] = image_numpy

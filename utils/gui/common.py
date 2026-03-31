@@ -3,9 +3,9 @@ from typing import Optional, Union
 import flet as ft
 import win32gui
 
-from simul import SimulatedUniverse
-from diver import DivergentUniverse
-from abyss import Abyss
+from asu.apps.abyss import Abyss
+from asu.apps.diver import DivergentUniverse
+from asu.apps.simul import SimulatedUniverse
 
 
 class Page(ft.Page):

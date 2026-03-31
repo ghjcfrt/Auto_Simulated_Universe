@@ -1,7 +1,8 @@
 from .operators import *
 
+
 def transform(data, ops=None):
-    """ transform """
+    """按顺序执行预处理算子。"""
     if ops is None:
         ops = []
     for op in ops:
@@ -13,10 +14,10 @@ def transform(data, ops=None):
 
 def create_operators(op_param_list, global_config=None):
     """
-    create operators based on the config
+    根据配置创建预处理算子。
 
-    Args:
-        params(list): a dict list, used to create some operators
+    参数:
+        算子配置列表。
     """
     assert isinstance(op_param_list, list), ('operator config should be a list')
     ops = []

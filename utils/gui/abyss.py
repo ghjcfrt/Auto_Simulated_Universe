@@ -1,10 +1,10 @@
 from flet_core import MainAxisAlignment, ControlEvent, CrossAxisAlignment
 import flet as ft
 
+from asu.apps.abyss import Abyss
 from utils.gui.common import show_snack_bar, Page
 import yaml
 import traceback
-from abyss import Abyss
 import os
 
 def abyss_view(page: Page):

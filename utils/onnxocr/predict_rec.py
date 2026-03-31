@@ -25,7 +25,6 @@ class TextRecognizer(PredictBase):
         imgC, imgH, imgW = self.rec_image_shape
         if self.rec_algorithm == 'NRTR' or self.rec_algorithm == 'ViTSTR':
             img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            # return padding_im
             image_pil = Image.fromarray(np.uint8(img))
             if self.rec_algorithm == 'ViTSTR':
                 img = image_pil.resize([imgW, imgH], Image.BICUBIC)
@@ -53,12 +52,6 @@ class TextRecognizer(PredictBase):
         assert imgC == img.shape[2]
         imgW = int((imgH * max_wh_ratio))
 
-        # w = self.rec_onnx_session.get_inputs()[0].shape[3:][0]
-        # w = self.rec_onnx_session.get_inputs()[0].shape[3:][0]
-        # print(w)
-        # if w is not None and w > 0:
-        #     imgW = w
-
 
         h, w = img.shape[:2]
         ratio = w / float(h)
@@ -82,7 +75,7 @@ class TextRecognizer(PredictBase):
     def resize_norm_img_vl(self, img, image_shape):
 
         imgC, imgH, imgW = image_shape
-        img = img[:, :, ::-1]  # bgr2rgb
+        img = img[:, :, ::-1]  # 通道顺序从蓝绿红转为红绿蓝
         resized_image = cv2.resize(
             img, (imgW, imgH), interpolation=cv2.INTER_LINEAR)
         resized_image = resized_image.astype('float32')
@@ -167,9 +160,9 @@ class TextRecognizer(PredictBase):
         h = img.shape[0]
         w = img.shape[1]
         valid_ratio = 1.0
-        # make sure new_width is an integral multiple of width_divisor.
+        # 确保目标宽度是下采样步长的整数倍
         width_divisor = int(1 / width_downsample_ratio)
-        # resize
+        # 缩放
         ratio = w / float(h)
         resize_w = math.ceil(imgH * ratio)
         if resize_w % width_divisor != 0:
@@ -181,7 +174,7 @@ class TextRecognizer(PredictBase):
             resize_w = min(imgW_max, resize_w)
         resized_image = cv2.resize(img, (resize_w, imgH))
         resized_image = resized_image.astype('float32')
-        # norm 
+        # 归一化
         if image_shape[0] == 1:
             resized_image = resized_image / 255
             resized_image = resized_image[np.newaxis, :]
@@ -198,7 +191,6 @@ class TextRecognizer(PredictBase):
 
     def resize_norm_img_spin(self, img):
         img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        # return padding_im
         img = cv2.resize(img, tuple([100, 32]), cv2.INTER_CUBIC)
         img = np.array(img, np.float32)
         img = np.expand_dims(img, -1)
@@ -245,7 +237,7 @@ class TextRecognizer(PredictBase):
     def norm_img_can(self, img, image_shape):
 
         img = cv2.cvtColor(
-            img, cv2.COLOR_BGR2GRAY)  # CAN only predict gray scale image
+            img, cv2.COLOR_BGR2GRAY)  # 仅支持灰度图输入
 
         if self.inverse:
             img = 255 - img
@@ -261,18 +253,18 @@ class TextRecognizer(PredictBase):
                                     constant_values=(255))
                 img = img_padded
 
-        img = np.expand_dims(img, 0) / 255.0  # h,w,c -> c,h,w
+        img = np.expand_dims(img, 0) / 255.0  # 维度从高宽通道转为通道高宽
         img = img.astype('float32')
 
         return img
 
     def __call__(self, img_list):
         img_num = len(img_list)
-        # Calculate the aspect ratio of all text bars
+        # 统计所有文本块的宽高比
         width_list = []
         for img in img_list:
             width_list.append(img.shape[1] / float(img.shape[0]))
-        # Sorting can speed up the recognition process
+        # 按宽高比排序可加速批量识别
         indices = np.argsort(np.array(width_list))
         rec_res = [['', 0.0]] * img_num
         batch_num = self.rec_batch_num
@@ -282,7 +274,6 @@ class TextRecognizer(PredictBase):
             norm_img_batch = []
             imgC, imgH, imgW = self.rec_image_shape[:3]
             max_wh_ratio = imgW / imgH
-            # max_wh_ratio = 0
             for ino in range(beg_img_no, end_img_no):
                 h, w = img_list[indices[ino]].shape[0:2]
                 wh_ratio = w * 1.0 / h
@@ -295,13 +286,6 @@ class TextRecognizer(PredictBase):
 
             norm_img_batch = np.concatenate(norm_img_batch)
             norm_img_batch = norm_img_batch.copy()
-
-            # img = img[:, :, ::-1].transpose(2, 0, 1)
-            # img = img[:, :, ::-1]
-            # img = img.transpose(2, 0, 1)
-            # img = img.astype(np.float32)
-            # img = np.expand_dims(img, axis=0)
-            # print(img.shape)
             input_feed = self.get_input_feed(self.rec_input_name, norm_img_batch)
             outputs = self.rec_onnx_session.run(self.rec_output_name, input_feed=input_feed)
 

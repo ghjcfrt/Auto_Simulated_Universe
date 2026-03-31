@@ -11,24 +11,20 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""
-This code is refered from:
-https://github.com/WenmuZhou/DBNet.pytorch/blob/master/post_processing/seg_detector_representer.py
-"""
+"""该实现参考开源文本检测后处理方案。"""
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
 import numpy as np
 import cv2
-# import paddle
 from shapely.geometry import Polygon
 import pyclipper
 
 
 class DBPostProcess(object):
     """
-    The post process for Differentiable Binarization (DB).
+    可微分二值化检测结果的后处理实现。
     """
 
     def __init__(self,
@@ -55,10 +51,9 @@ class DBPostProcess(object):
             [[1, 1], [1, 1]])
 
     def polygons_from_bitmap(self, pred, _bitmap, dest_width, dest_height):
-        '''
-        _bitmap: single map with shape (1, H, W),
-            whose values are binarized as {0, 1}
-        '''
+        """
+        从二值图中提取多边形检测框。
+        """
 
         bitmap = _bitmap
         height, width = bitmap.shape
@@ -102,10 +97,9 @@ class DBPostProcess(object):
         return boxes, scores
 
     def boxes_from_bitmap(self, pred, _bitmap, dest_width, dest_height):
-        '''
-        _bitmap: single map with shape (1, H, W),
-                whose values are binarized as {0, 1}
-        '''
+        """
+        从二值图中提取四边形检测框。
+        """
 
         bitmap = _bitmap
         height, width = bitmap.shape
@@ -180,9 +174,7 @@ class DBPostProcess(object):
         return box, min(bounding_box[1])
 
     def box_score_fast(self, bitmap, _box):
-        '''
-        box_score_fast: use bbox mean score as the mean score
-        '''
+        """使用外接框区域均值作为置信度。"""
         h, w = bitmap.shape[:2]
         box = _box.copy()
         xmin = np.clip(np.floor(box[:, 0].min()).astype("int32"), 0, w - 1)
@@ -197,9 +189,7 @@ class DBPostProcess(object):
         return cv2.mean(bitmap[ymin:ymax + 1, xmin:xmax + 1], mask)[0]
 
     def box_score_slow(self, bitmap, contour):
-        '''
-        box_score_slow: use polyon mean score as the mean score
-        '''
+        """使用多边形区域均值作为置信度。"""
         h, w = bitmap.shape[:2]
         contour = contour.copy()
         contour = np.reshape(contour, (-1, 2))
@@ -219,8 +209,6 @@ class DBPostProcess(object):
 
     def __call__(self, outs_dict, shape_list):
         pred = outs_dict['maps']
-        # if isinstance(pred, paddle.Tensor):
-        #     pred = pred.numpy()
         pred = pred[:, 0, :, :]
         segmentation = pred > self.thresh
 

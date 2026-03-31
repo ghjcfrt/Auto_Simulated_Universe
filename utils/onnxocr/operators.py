@@ -5,8 +5,7 @@ import math
 
 
 class NormalizeImage(object):
-    """ normalize image such as substract mean, divide std
-    """
+    """对图像做归一化处理（减均值、除方差）。"""
 
     def __init__(self, scale=None, mean=None, std=None, order='chw', **kwargs):
         if isinstance(scale, str):
@@ -58,12 +57,10 @@ class DetResizeForTest(object):
             img = self.image_padding(img)
 
         if self.resize_type == 0:
-            # img, shape = self.resize_image_type0(img)
             img, [ratio_h, ratio_w] = self.resize_image_type0(img)
         elif self.resize_type == 2:
             img, [ratio_h, ratio_w] = self.resize_image_type2(img)
         else:
-            # img, shape = self.resize_image_type1(img)
             img, [ratio_h, ratio_w] = self.resize_image_type1(img)
         data['image'] = img
         data['shape'] = np.array([src_h, src_w, ratio_h, ratio_w])
@@ -77,7 +74,7 @@ class DetResizeForTest(object):
 
     def resize_image_type1(self, img):
         resize_h, resize_w = self.image_shape
-        ori_h, ori_w = img.shape[:2]  # (h, w, c)
+        ori_h, ori_w = img.shape[:2]  # 原图高宽
         if self.keep_ratio is True:
             resize_w = ori_w * resize_h / ori_h
             N = math.ceil(resize_w / 32)
@@ -85,21 +82,16 @@ class DetResizeForTest(object):
         ratio_h = float(resize_h) / ori_h
         ratio_w = float(resize_w) / ori_w
         img = cv2.resize(img, (int(resize_w), int(resize_h)))
-        # return img, np.array([ori_h, ori_w])
         return img, [ratio_h, ratio_w]
 
     def resize_image_type0(self, img):
         """
-        resize image to a size multiple of 32 which is required by the network
-        args:
-            img(array): array with shape [h, w, c]
-        return(tuple):
-            img, (ratio_h, ratio_w)
+        将图像缩放到网络要求的 32 倍数尺寸。
         """
         limit_side_len = self.limit_side_len
         h, w, c = img.shape
 
-        # limit the max side
+        # 约束最长边或最短边
         if self.limit_type == 'max':
             if max(h, w) > limit_side_len:
                 if h > w:
@@ -161,8 +153,7 @@ class DetResizeForTest(object):
         return img, [ratio_h, ratio_w]
 
 class ToCHWImage(object):
-    """ convert hwc image to chw image
-    """
+    """将图像通道顺序从高宽通道转换为通道高宽。"""
 
     def __init__(self, **kwargs):
         pass

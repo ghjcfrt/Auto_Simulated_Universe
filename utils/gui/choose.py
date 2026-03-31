@@ -4,14 +4,14 @@ import flet as ft
 import win32gui
 from flet_core import MainAxisAlignment, CrossAxisAlignment
 
-from align_angle import main as align_angle
+from asu.apps.align_angle import main as align_angle
+from asu.apps.diver import DivergentUniverse, version
+from asu.apps.simul import SimulatedUniverse
 from utils.gui.common import show_snack_bar, Page, list_handles
-from simul import SimulatedUniverse
-from diver import DivergentUniverse, version
 from utils.diver.config import config as config_diver
 from utils.simul.config import config as config_simul
 from utils.simul.update_map import update_map
-from utils.simul.utils import notif
+from utils.common.runtime import notif
 from utils.diver.args import args
 from utils.log import my_print as print
 from utils.log import print_exc
@@ -160,7 +160,6 @@ def choose_view(page: Page):
     def go_dep(e=None):
         dlg = ft.AlertDialog(
             title=ft.Text("异常退出"),
-            content=ft.Text(" "),  # "请确认python+numpy已安装并正确配置环境变量")
         )
         page.dialog = dlg
         dlg.open = True
@@ -181,7 +180,7 @@ def choose_view(page: Page):
     def bonus_changed(e):
         config_simul.bonus = not config_simul.bonus
 
-    # View
+    # 主界面
     page.views.append(
         ft.View(
             "/",
@@ -331,3 +330,4 @@ def choose_view(page: Page):
             vertical_alignment=MainAxisAlignment.CENTER,
         )
     )
+

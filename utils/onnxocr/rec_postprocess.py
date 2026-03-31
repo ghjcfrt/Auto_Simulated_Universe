@@ -1,12 +1,10 @@
 
 import numpy as np
-# import paddle
-# from paddle.nn import functional as F
 import re
 
 
 class BaseRecLabelDecode(object):
-    """ Convert between text-label and text-index """
+    """在文本标签与索引之间转换。"""
 
     def __init__(self, character_dict_path=None, use_space_char=False):
         self.beg_str = "sos"
@@ -55,7 +53,7 @@ class BaseRecLabelDecode(object):
         return dict_character
 
     def decode(self, text_index, text_prob=None, is_remove_duplicate=False):
-        """ convert text-index into text-label. """
+        """将文本索引解码为文本标签。"""
         result_list = []
         ignored_tokens = self.get_ignored_tokens()
         batch_size = len(text_index)
@@ -80,18 +78,18 @@ class BaseRecLabelDecode(object):
 
             text = ''.join(char_list)
 
-            if self.reverse:  # for arabic rec
+            if self.reverse:  # 阿拉伯语识别时需要反转
                 text = self.pred_reverse(text)
 
             result_list.append((text, np.mean(conf_list).tolist()))
         return result_list
 
     def get_ignored_tokens(self):
-        return [0]  # for ctc blank
+        return [0]  # 空白占位符
 
 
 class CTCLabelDecode(BaseRecLabelDecode):
-    """ Convert between text-label and text-index """
+    """在文本标签与索引之间转换。"""
 
     def __init__(self, character_dict_path=None, use_space_char=False,
                  **kwargs):
@@ -101,8 +99,6 @@ class CTCLabelDecode(BaseRecLabelDecode):
     def __call__(self, preds, label=None, *args, **kwargs):
         if isinstance(preds, tuple) or isinstance(preds, list):
             preds = preds[-1]
-        # if isinstance(preds, paddle.Tensor):
-        #     preds = preds.numpy()
         preds_idx = preds.argmax(axis=2)
         preds_prob = preds.max(axis=2)
         text = self.decode(preds_idx, preds_prob, is_remove_duplicate=True)
@@ -117,10 +113,7 @@ class CTCLabelDecode(BaseRecLabelDecode):
 
 
 class DistillationCTCLabelDecode(CTCLabelDecode):
-    """
-    Convert 
-    Convert between text-label and text-index
-    """
+    """在文本标签与索引之间转换。"""
 
     def __init__(self,
                  character_dict_path=None,
@@ -151,7 +144,7 @@ class DistillationCTCLabelDecode(CTCLabelDecode):
 
 
 class AttnLabelDecode(BaseRecLabelDecode):
-    """ Convert between text-label and text-index """
+    """在文本标签与索引之间转换。"""
 
     def __init__(self, character_dict_path=None, use_space_char=False,
                  **kwargs):
@@ -166,7 +159,7 @@ class AttnLabelDecode(BaseRecLabelDecode):
         return dict_character
 
     def decode(self, text_index, text_prob=None, is_remove_duplicate=False):
-        """ convert text-index into text-label. """
+        """将文本索引解码为文本标签。"""
         result_list = []
         ignored_tokens = self.get_ignored_tokens()
         [beg_idx, end_idx] = self.get_ignored_tokens()
@@ -180,7 +173,7 @@ class AttnLabelDecode(BaseRecLabelDecode):
                 if int(text_index[batch_idx][idx]) == int(end_idx):
                     break
                 if is_remove_duplicate:
-                    # only for predict
+                    # 仅在预测阶段去重
                     if idx > 0 and text_index[batch_idx][idx - 1] == text_index[
                             batch_idx][idx]:
                         continue
@@ -195,14 +188,6 @@ class AttnLabelDecode(BaseRecLabelDecode):
         return result_list
 
     def __call__(self, preds, label=None, *args, **kwargs):
-        """
-        text = self.decode(text)
-        if label is None:
-            return text
-        else:
-            label = self.decode(label, is_remove_duplicate=False)
-            return text, label
-        """
         if isinstance(preds, paddle.Tensor):
             preds = preds.numpy()
 
@@ -231,7 +216,7 @@ class AttnLabelDecode(BaseRecLabelDecode):
 
 
 class RFLLabelDecode(BaseRecLabelDecode):
-    """ Convert between text-label and text-index """
+    """在文本标签与索引之间转换。"""
 
     def __init__(self, character_dict_path=None, use_space_char=False,
                  **kwargs):
@@ -246,7 +231,7 @@ class RFLLabelDecode(BaseRecLabelDecode):
         return dict_character
 
     def decode(self, text_index, text_prob=None, is_remove_duplicate=False):
-        """ convert text-index into text-label. """
+        """将文本索引解码为文本标签。"""
         result_list = []
         ignored_tokens = self.get_ignored_tokens()
         [beg_idx, end_idx] = self.get_ignored_tokens()
@@ -260,7 +245,7 @@ class RFLLabelDecode(BaseRecLabelDecode):
                 if int(text_index[batch_idx][idx]) == int(end_idx):
                     break
                 if is_remove_duplicate:
-                    # only for predict
+                    # 仅在预测阶段去重
                     if idx > 0 and text_index[batch_idx][idx - 1] == text_index[
                             batch_idx][idx]:
                         continue
@@ -275,7 +260,7 @@ class RFLLabelDecode(BaseRecLabelDecode):
         return result_list
 
     def __call__(self, preds, label=None, *args, **kwargs):
-        # if seq_outputs is not None:
+        # 序列输出分支
         if isinstance(preds, tuple) or isinstance(preds, list):
             cnt_outputs, seq_outputs = preds
             if isinstance(seq_outputs, paddle.Tensor):
@@ -320,7 +305,7 @@ class RFLLabelDecode(BaseRecLabelDecode):
 
 
 class SEEDLabelDecode(BaseRecLabelDecode):
-    """ Convert between text-label and text-index """
+    """在文本标签与索引之间转换。"""
 
     def __init__(self, character_dict_path=None, use_space_char=False,
                  **kwargs):
@@ -350,7 +335,7 @@ class SEEDLabelDecode(BaseRecLabelDecode):
         return idx
 
     def decode(self, text_index, text_prob=None, is_remove_duplicate=False):
-        """ convert text-index into text-label. """
+        """将文本索引解码为文本标签。"""
         result_list = []
         [end_idx] = self.get_ignored_tokens()
         batch_size = len(text_index)
@@ -361,7 +346,7 @@ class SEEDLabelDecode(BaseRecLabelDecode):
                 if int(text_index[batch_idx][idx]) == int(end_idx):
                     break
                 if is_remove_duplicate:
-                    # only for predict
+                    # 仅在预测阶段去重
                     if idx > 0 and text_index[batch_idx][idx - 1] == text_index[
                             batch_idx][idx]:
                         continue
@@ -376,14 +361,6 @@ class SEEDLabelDecode(BaseRecLabelDecode):
         return result_list
 
     def __call__(self, preds, label=None, *args, **kwargs):
-        """
-        text = self.decode(text)
-        if label is None:
-            return text
-        else:
-            label = self.decode(label, is_remove_duplicate=False)
-            return text, label
-        """
         preds_idx = preds["rec_pred"]
         if isinstance(preds_idx, paddle.Tensor):
             preds_idx = preds_idx.numpy()
@@ -401,7 +378,7 @@ class SEEDLabelDecode(BaseRecLabelDecode):
 
 
 class SRNLabelDecode(BaseRecLabelDecode):
-    """ Convert between text-label and text-index """
+    """在文本标签与索引之间转换。"""
 
     def __init__(self, character_dict_path=None, use_space_char=False,
                  **kwargs):
@@ -432,7 +409,7 @@ class SRNLabelDecode(BaseRecLabelDecode):
         return text, label
 
     def decode(self, text_index, text_prob=None, is_remove_duplicate=False):
-        """ convert text-index into text-label. """
+        """将文本索引解码为文本标签。"""
         result_list = []
         ignored_tokens = self.get_ignored_tokens()
         batch_size = len(text_index)
@@ -444,7 +421,7 @@ class SRNLabelDecode(BaseRecLabelDecode):
                 if text_index[batch_idx][idx] in ignored_tokens:
                     continue
                 if is_remove_duplicate:
-                    # only for predict
+                    # 仅在预测阶段去重
                     if idx > 0 and text_index[batch_idx][idx - 1] == text_index[
                             batch_idx][idx]:
                         continue
@@ -480,7 +457,7 @@ class SRNLabelDecode(BaseRecLabelDecode):
 
 
 class SARLabelDecode(BaseRecLabelDecode):
-    """ Convert between text-label and text-index """
+    """在文本标签与索引之间转换。"""
 
     def __init__(self, character_dict_path=None, use_space_char=False,
                  **kwargs):
@@ -503,7 +480,7 @@ class SARLabelDecode(BaseRecLabelDecode):
         return dict_character
 
     def decode(self, text_index, text_prob=None, is_remove_duplicate=False):
-        """ convert text-index into text-label. """
+        """将文本索引解码为文本标签。"""
         result_list = []
         ignored_tokens = self.get_ignored_tokens()
 
@@ -520,7 +497,7 @@ class SARLabelDecode(BaseRecLabelDecode):
                     else:
                         break
                 if is_remove_duplicate:
-                    # only for predict
+                    # 仅在预测阶段去重
                     if idx > 0 and text_index[batch_idx][idx - 1] == text_index[
                             batch_idx][idx]:
                         continue
@@ -556,10 +533,7 @@ class SARLabelDecode(BaseRecLabelDecode):
 
 
 class DistillationSARLabelDecode(SARLabelDecode):
-    """
-    Convert 
-    Convert between text-label and text-index
-    """
+    """在文本标签与索引之间转换。"""
 
     def __init__(self,
                  character_dict_path=None,
@@ -590,7 +564,7 @@ class DistillationSARLabelDecode(SARLabelDecode):
 
 
 class PRENLabelDecode(BaseRecLabelDecode):
-    """ Convert between text-label and text-index """
+    """在文本标签与索引之间转换。"""
 
     def __init__(self, character_dict_path=None, use_space_char=False,
                  **kwargs):
@@ -610,7 +584,7 @@ class PRENLabelDecode(BaseRecLabelDecode):
         return dict_character
 
     def decode(self, text_index, text_prob=None):
-        """ convert text-index into text-label. """
+        """将文本索引解码为文本标签。"""
         result_list = []
         batch_size = len(text_index)
 
@@ -634,7 +608,7 @@ class PRENLabelDecode(BaseRecLabelDecode):
             if len(text) > 0:
                 result_list.append((text, np.mean(conf_list).tolist()))
             else:
-                # here confidence of empty recog result is 1
+                # 空识别结果的置信度记为 1
                 result_list.append(('', 1))
         return result_list
 
@@ -651,7 +625,7 @@ class PRENLabelDecode(BaseRecLabelDecode):
 
 
 class NRTRLabelDecode(BaseRecLabelDecode):
-    """ Convert between text-label and text-index """
+    """在文本标签与索引之间转换。"""
 
     def __init__(self, character_dict_path=None, use_space_char=True, **kwargs):
         super(NRTRLabelDecode, self).__init__(character_dict_path,
@@ -691,7 +665,7 @@ class NRTRLabelDecode(BaseRecLabelDecode):
         return dict_character
 
     def decode(self, text_index, text_prob=None, is_remove_duplicate=False):
-        """ convert text-index into text-label. """
+        """将文本索引解码为文本标签。"""
         result_list = []
         batch_size = len(text_index)
         for batch_idx in range(batch_size):
@@ -702,7 +676,7 @@ class NRTRLabelDecode(BaseRecLabelDecode):
                     char_idx = self.character[int(text_index[batch_idx][idx])]
                 except:
                     continue
-                if char_idx == '</s>':  # end
+                if char_idx == '</s>':  # 结束标记
                     break
                 char_list.append(char_idx)
                 if text_prob is not None:
@@ -715,7 +689,7 @@ class NRTRLabelDecode(BaseRecLabelDecode):
 
 
 class ViTSTRLabelDecode(NRTRLabelDecode):
-    """ Convert between text-label and text-index """
+    """在文本标签与索引之间转换。"""
 
     def __init__(self, character_dict_path=None, use_space_char=False,
                  **kwargs):
@@ -741,7 +715,7 @@ class ViTSTRLabelDecode(NRTRLabelDecode):
 
 
 class ABINetLabelDecode(NRTRLabelDecode):
-    """ Convert between text-label and text-index """
+    """在文本标签与索引之间转换。"""
 
     def __init__(self, character_dict_path=None, use_space_char=False,
                  **kwargs):
@@ -770,7 +744,7 @@ class ABINetLabelDecode(NRTRLabelDecode):
 
 
 class SPINLabelDecode(AttnLabelDecode):
-    """ Convert between text-label and text-index """
+    """在文本标签与索引之间转换。"""
 
     def __init__(self, character_dict_path=None, use_space_char=False,
                  **kwargs):
@@ -785,108 +759,9 @@ class SPINLabelDecode(AttnLabelDecode):
         return dict_character
 
 
-# class VLLabelDecode(BaseRecLabelDecode):
-#     """ Convert between text-label and text-index """
-#
-#     def __init__(self, character_dict_path=None, use_space_char=False,
-#                  **kwargs):
-#         super(VLLabelDecode, self).__init__(character_dict_path, use_space_char)
-#         self.max_text_length = kwargs.get('max_text_length', 25)
-#         self.nclass = len(self.character) + 1
-#
-#     def decode(self, text_index, text_prob=None, is_remove_duplicate=False):
-#         """ convert text-index into text-label. """
-#         result_list = []
-#         ignored_tokens = self.get_ignored_tokens()
-#         batch_size = len(text_index)
-#         for batch_idx in range(batch_size):
-#             selection = np.ones(len(text_index[batch_idx]), dtype=bool)
-#             if is_remove_duplicate:
-#                 selection[1:] = text_index[batch_idx][1:] != text_index[
-#                     batch_idx][:-1]
-#             for ignored_token in ignored_tokens:
-#                 selection &= text_index[batch_idx] != ignored_token
-#
-#             char_list = [
-#                 self.character[text_id - 1]
-#                 for text_id in text_index[batch_idx][selection]
-#             ]
-#             if text_prob is not None:
-#                 conf_list = text_prob[batch_idx][selection]
-#             else:
-#                 conf_list = [1] * len(selection)
-#             if len(conf_list) == 0:
-#                 conf_list = [0]
-#
-#             text = ''.join(char_list)
-#             result_list.append((text, np.mean(conf_list).tolist()))
-#         return result_list
-#
-#     def __call__(self, preds, label=None, length=None, *args, **kwargs):
-#         if len(preds) == 2:  # eval mode
-#             text_pre, x = preds
-#             b = text_pre.shape[1]
-#             lenText = self.max_text_length
-#             nsteps = self.max_text_length
-#
-#             if not isinstance(text_pre, paddle.Tensor):
-#                 text_pre = paddle.to_tensor(text_pre, dtype='float32')
-#
-#             out_res = paddle.zeros(
-#                 shape=[lenText, b, self.nclass], dtype=x.dtype)
-#             out_length = paddle.zeros(shape=[b], dtype=x.dtype)
-#             now_step = 0
-#             for _ in range(nsteps):
-#                 if 0 in out_length and now_step < nsteps:
-#                     tmp_result = text_pre[now_step, :, :]
-#                     out_res[now_step] = tmp_result
-#                     tmp_result = tmp_result.topk(1)[1].squeeze(axis=1)
-#                     for j in range(b):
-#                         if out_length[j] == 0 and tmp_result[j] == 0:
-#                             out_length[j] = now_step + 1
-#                     now_step += 1
-#             for j in range(0, b):
-#                 if int(out_length[j]) == 0:
-#                     out_length[j] = nsteps
-#             start = 0
-#             output = paddle.zeros(
-#                 shape=[int(out_length.sum()), self.nclass], dtype=x.dtype)
-#             for i in range(0, b):
-#                 cur_length = int(out_length[i])
-#                 output[start:start + cur_length] = out_res[0:cur_length, i, :]
-#                 start += cur_length
-#             net_out = output
-#             length = out_length
-#
-#         else:  # train mode
-#             net_out = preds[0]
-#             length = length
-#             net_out = paddle.concat([t[:l] for t, l in zip(net_out, length)])
-#         text = []
-#         if not isinstance(net_out, paddle.Tensor):
-#             net_out = paddle.to_tensor(net_out, dtype='float32')
-#         net_out = F.softmax(net_out, axis=1)
-#         for i in range(0, length.shape[0]):
-#             preds_idx = net_out[int(length[:i].sum()):int(length[:i].sum(
-#             ) + length[i])].topk(1)[1][:, 0].tolist()
-#             preds_text = ''.join([
-#                 self.character[idx - 1]
-#                 if idx > 0 and idx <= len(self.character) else ''
-#                 for idx in preds_idx
-#             ])
-#             preds_prob = net_out[int(length[:i].sum()):int(length[:i].sum(
-#             ) + length[i])].topk(1)[0][:, 0]
-#             preds_prob = paddle.exp(
-#                 paddle.log(preds_prob).sum() / (preds_prob.shape[0] + 1e-6))
-#             text.append((preds_text, preds_prob.numpy()[0]))
-#         if label is None:
-#             return text
-#         label = self.decode(label)
-#         return text, label
-
 
 class CANLabelDecode(BaseRecLabelDecode):
-    """ Convert between latex-symbol and symbol-index """
+    """在公式符号与索引之间转换。"""
 
     def __init__(self, character_dict_path=None, use_space_char=False,
                  **kwargs):
@@ -916,3 +791,4 @@ class CANLabelDecode(BaseRecLabelDecode):
             return text
         label = self.decode(label)
         return text, label
+

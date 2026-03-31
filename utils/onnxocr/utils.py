@@ -8,16 +8,7 @@ from utils.diver.config import config
 abspath = os.path.dirname(os.path.dirname(os.path.dirname(__file__))) + '/'
 
 def get_rotate_crop_image(img, points):
-    '''
-    img_height, img_width = img.shape[0:2]
-    left = int(np.min(points[:, 0]))
-    right = int(np.max(points[:, 0]))
-    top = int(np.min(points[:, 1]))
-    bottom = int(np.max(points[:, 1]))
-    img_crop = img[top:bottom, left:right, :].copy()
-    points[:, 0] = points[:, 0] - left
-    points[:, 1] = points[:, 1] - top
-    '''
+    """根据四点框透视裁剪文本区域。"""
     assert len(points) == 4, "shape of points must be 4*2"
     img_crop_width = int(
         max(
@@ -65,9 +56,7 @@ def get_minarea_rect_crop(img, points):
 
 
 def resize_img(img, input_size=600):
-    """
-    resize img and limit the longest side of the image to input_size
-    """
+    """缩放图像，并限制最长边到指定尺寸。"""
     img = np.array(img)
     im_shape = img.shape
     im_size_max = np.max(im_shape[0:2])
@@ -77,13 +66,8 @@ def resize_img(img, input_size=600):
 
 def str_count(s):
     """
-    Count the number of Chinese characters,
-    a single English character and a single number
-    equal to half the length of Chinese characters.
-    args:
-        s(string): the input of string
-    return(int):
-        the number of Chinese characters
+    统计字符串等效长度。
+    中文按 1 计数，字母/数字/空格按 0.5 计数。
     """
     import string
     count_zh = count_pu = 0
@@ -105,14 +89,7 @@ def text_visual(texts,
                 threshold=0.,
                 font_path="./onnx/fonts/simfang.ttf"):
     """
-    create new blank img and draw txt on it
-    args:
-        texts(list): the text will be draw
-        scores(list|None): corresponding score of each txt
-        img_h(int): the height of blank img
-        img_w(int): the width of blank img
-        font_path: the path of font which is used to draw text
-    return(array):
+    创建空白画布并绘制识别文本与分数。
     """
     if scores is not None:
         assert len(texts) == len(
@@ -160,7 +137,7 @@ def text_visual(texts,
         else:
             new_txt = "  " + txt + "  " + '%.3f' % (scores[idx])
         draw_txt.text((0, gap * count), new_txt, txt_color, font=font)
-        # whether add new blank img or not
+        # 判断是否需要新建一页画布
         if count >= img_h // gap - 1 and idx + 1 < len(texts):
             txt_img_list.append(np.array(blank_img))
             blank_img, draw_txt = create_blank_img()
@@ -180,16 +157,7 @@ def draw_ocr(image,
              drop_score=0.5,
              font_path="./onnxocr/fonts/simfang.ttf"):
     """
-    Visualize the results of OCR detection and recognition
-    args:
-        image(Image|array): RGB image
-        boxes(list): boxes with shape(N, 4, 2)
-        txts(list): the texts
-        scores(list): txxs corresponding scores
-        drop_score(float): only scores greater than drop_threshold will be visualized
-        font_path: the path of font which is used to draw text
-    return(array):
-        the visualized img
+    将检测框与识别文本可视化到图像上。
     """
     if scores is None:
         scores = [1] * len(boxes)
@@ -225,7 +193,7 @@ def str2bool(v):
 
 def infer_args():
     parser = argparse.ArgumentParser()
-    # params for prediction engine
+    # 推理引擎参数
     parser.add_argument("--use_gpu", type=str2bool, default=True)
     parser.add_argument("--use_xpu", type=str2bool, default=False)
     parser.add_argument("--use_npu", type=str2bool, default=False)
@@ -236,7 +204,7 @@ def infer_args():
     parser.add_argument("--gpu_mem", type=int, default=500)
     parser.add_argument("--gpu_id", type=int, default=0)
 
-    # params for text detector
+    # 文本检测参数
     parser.add_argument("--image_dir", type=str)
     parser.add_argument("--page_num", type=int, default=0)
     parser.add_argument("--det_algorithm", type=str, default='DB')
@@ -245,7 +213,7 @@ def infer_args():
     parser.add_argument("--det_limit_type", type=str, default='max')
     parser.add_argument("--det_box_type", type=str, default='quad')
 
-    # DB parmas
+    # 差分二值化检测参数
     parser.add_argument("--det_db_thresh", type=float, default=0.3)
     parser.add_argument("--det_db_box_thresh", type=float, default=0.5)
     parser.add_argument("--det_db_unclip_ratio", type=float, default=1.6)
@@ -253,28 +221,28 @@ def infer_args():
     parser.add_argument("--use_dilation", type=str2bool, default=True)
     parser.add_argument("--det_db_score_mode", type=str, default="fast")
 
-    # EAST parmas
+    # 东方文本检测参数
     parser.add_argument("--det_east_score_thresh", type=float, default=0.8)
     parser.add_argument("--det_east_cover_thresh", type=float, default=0.1)
     parser.add_argument("--det_east_nms_thresh", type=float, default=0.2)
 
-    # SAST parmas
+    # 自适应文本检测参数
     parser.add_argument("--det_sast_score_thresh", type=float, default=0.5)
     parser.add_argument("--det_sast_nms_thresh", type=float, default=0.2)
 
-    # PSE parmas
+    # 渐进扩张检测参数
     parser.add_argument("--det_pse_thresh", type=float, default=0)
     parser.add_argument("--det_pse_box_thresh", type=float, default=0.85)
     parser.add_argument("--det_pse_min_area", type=float, default=16)
     parser.add_argument("--det_pse_scale", type=int, default=1)
 
-    # FCE parmas
+    # 傅里叶轮廓检测参数
     parser.add_argument("--scales", type=list, default=[8, 16, 32])
     parser.add_argument("--alpha", type=float, default=1.0)
     parser.add_argument("--beta", type=float, default=1.0)
     parser.add_argument("--fourier_degree", type=int, default=5)
 
-    # params for text recognizer
+    # 文本识别参数
     parser.add_argument("--rec_algorithm", type=str, default='SVTR_LCNet')
     parser.add_argument("--rec_model_dir", type=str, default=abspath + 'utils/models/v4_rec.onnx')
     parser.add_argument("--rec_image_inverse", type=str2bool, default=True)
@@ -290,20 +258,20 @@ def infer_args():
         "--vis_font_path", type=str, default="./onnxocr/fonts/simfang.ttf")
     parser.add_argument("--drop_score", type=float, default=0.5)
 
-    # params for e2e
+    # 端到端参数
     parser.add_argument("--e2e_algorithm", type=str, default='PGNet')
     parser.add_argument("--e2e_model_dir", type=str)
     parser.add_argument("--e2e_limit_side_len", type=float, default=768)
     parser.add_argument("--e2e_limit_type", type=str, default='max')
 
-    # PGNet parmas
+    # 端到端文本网络参数
     parser.add_argument("--e2e_pgnet_score_thresh", type=float, default=0.5)
     parser.add_argument(
         "--e2e_char_dict_path", type=str, default="./onnxocr/ppocr/utils/ic15_dict.txt")
     parser.add_argument("--e2e_pgnet_valid_set", type=str, default='totaltext')
     parser.add_argument("--e2e_pgnet_mode", type=str, default='fast')
 
-    # params for text classifier
+    # 文本分类参数
     parser.add_argument("--use_angle_cls", type=str2bool, default=False)
     parser.add_argument("--cls_model_dir", type=str, default='./onnxocr/models/ppocrv4/cls/cls.onnx')
     parser.add_argument("--cls_image_shape", type=str, default="3, 48, 192")
@@ -316,7 +284,7 @@ def infer_args():
     parser.add_argument("--use_pdserving", type=str2bool, default=False)
     parser.add_argument("--warmup", type=str2bool, default=False)
 
-    # SR parmas
+    # 超分辨率参数
     parser.add_argument("--sr_model_dir", type=str)
     parser.add_argument("--sr_image_shape", type=str, default="3, 32, 128")
     parser.add_argument("--sr_batch_num", type=int, default=1)
@@ -327,7 +295,7 @@ def infer_args():
     parser.add_argument("--save_crop_res", type=str2bool, default=False)
     parser.add_argument("--crop_res_save_dir", type=str, default="./onnxocr/output")
 
-    # multi-process
+    # 多进程参数
     parser.add_argument("--use_mp", type=str2bool, default=False)
     parser.add_argument("--total_process_num", type=int, default=1)
     parser.add_argument("--process_id", type=int, default=0)

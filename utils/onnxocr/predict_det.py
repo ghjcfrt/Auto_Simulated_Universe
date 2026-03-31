@@ -40,7 +40,6 @@ class TextDetector(PredictBase):
 
         # 实例化预处理操作类
         self.preprocess_op = create_operators(pre_process_list)
-        # self.postprocess_op = build_post_process(postprocess_params)
         # 实例化后处理操作类
         self.postprocess_op = DBPostProcess(**postprocess_params)
 

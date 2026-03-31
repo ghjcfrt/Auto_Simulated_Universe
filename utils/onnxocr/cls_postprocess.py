@@ -1,9 +1,6 @@
 
-# import paddle
-
-
 class ClsPostProcess(object):
-    """ Convert between text-label and text-index """
+    """在文本标签与索引之间做转换。"""
 
     def __init__(self, label_list=None, key=None, **kwargs):
         super(ClsPostProcess, self).__init__()
@@ -17,9 +14,6 @@ class ClsPostProcess(object):
         label_list = self.label_list
         if label_list is None:
             label_list = {idx: idx for idx in range(preds.shape[-1])}
-
-        # if isinstance(preds, paddle.Tensor):
-        #     preds = preds.numpy()
 
         pred_idxs = preds.argmax(axis=1)
         decode_out = [(label_list[idx], preds[i, idx])

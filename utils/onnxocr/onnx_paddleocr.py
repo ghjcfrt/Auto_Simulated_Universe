@@ -17,7 +17,6 @@ class ONNXPaddleOcr(TextSystem):
         params = argparse.Namespace(**inference_args_dict)
         
 
-        # params.rec_image_shape = "3, 32, 320"
         params.rec_image_shape = "3, 48, 320"
 
         # 根据传入的参数覆盖更新默认参数
@@ -36,8 +35,7 @@ def sav2Img(org_img, result, name="draw_ocr.jpg"):
     # 显示结果
     from PIL import Image
     result = result[0]
-    # image = Image.open(img_path).convert('RGB')
-    # 图像转BGR2RGB
+    # 图像通道顺序从蓝绿红转换为红绿蓝
     image = org_img[:, :, ::-1]
     boxes = [line[0] for line in result]
     txts = [line[1][0] for line in result]

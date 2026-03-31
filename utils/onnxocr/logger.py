@@ -22,7 +22,6 @@ class Logger:
         formatPrint = logging.Formatter(
             '【%(levelname)s】 %(message)s')
         streamHandler.setFormatter(formatPrint)
-        # self.logger.addHandler(streamHandler)
 
         return
         # 日志文件

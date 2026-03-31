@@ -10,7 +10,9 @@ from asu.core.simul.constants import DEFAULT_PRIOR, DEFAULT_SECONDARY_FATE
 
 class Config:
     def __init__(self):
-        self.abspath = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))  # 获取项目根目录
+        self.abspath = os.path.dirname(
+            os.path.dirname(os.path.dirname(__file__))
+        )  # 获取项目根目录
         if getattr(sys, "frozen", False):
             self.abspath = "."
         self.order_text = "1 2 3 4"
@@ -20,7 +22,17 @@ class Config:
         self.text = "info_old.yml"
         self.fate = "巡猎"
         self.map_sha = ""
-        self.fates = ["存护", "记忆", "虚无", "丰饶", "巡猎", "毁灭", "欢愉", "繁育", "智识"]
+        self.fates = [
+            "存护",
+            "记忆",
+            "虚无",
+            "丰饶",
+            "巡猎",
+            "毁灭",
+            "欢愉",
+            "繁育",
+            "智识",
+        ]
         self.show_map_mode = 0
         self.debug_mode = 0
         self.speed_mode = 0
@@ -32,7 +44,21 @@ class Config:
         self.bonus = 0
         self.timezones = ["America", "Asia", "Europe", "Default"]
         self.timezone = "Default"
-        self.origin_key = ["f", "m", "shift", "v", "e", "w", "a", "s", "d", "1", "2", "3", "4"]
+        self.origin_key = [
+            "f",
+            "m",
+            "shift",
+            "v",
+            "e",
+            "w",
+            "a",
+            "s",
+            "d",
+            "1",
+            "2",
+            "3",
+            "4",
+        ]
         self.mapping = list(self.origin_key)
         self.max_run = 34
         self.read()
@@ -125,15 +151,21 @@ class Config:
             self.difficult = str(config.get("difficulty", self.difficult))
             self.fate = str(config.get("fate", self.fate))
             self.map_sha = str(config.get("map_sha", self.map_sha))
-            self.show_map_mode = self._safe_int(config.get("show_map_mode"), self.show_map_mode)
+            self.show_map_mode = self._safe_int(
+                config.get("show_map_mode"), self.show_map_mode
+            )
             self.debug_mode = self._safe_int(config.get("debug_mode"), self.debug_mode)
             self.speed_mode = self._safe_int(config.get("speed_mode"), self.speed_mode)
             self.bonus = self._safe_int(config.get("bonus"), self.bonus)
             self.long_press_sprint = self._safe_int(
                 config.get("long_press_sprint"), self.long_press_sprint
             )
-            self.use_consumable = self._safe_int(config.get("use_consumable"), self.use_consumable)
-            self.force_update = self._safe_int(config.get("force_update"), self.force_update)
+            self.use_consumable = self._safe_int(
+                config.get("use_consumable"), self.use_consumable
+            )
+            self.force_update = self._safe_int(
+                config.get("force_update"), self.force_update
+            )
             self.timezone = str(config.get("timezone", self.timezone))
             self.slow_mode = self._safe_int(config.get("slow_mode"), self.slow_mode)
             self.max_run = self._safe_int(config.get("max_run"), self.max_run)
@@ -150,7 +182,11 @@ class Config:
             yaml.safe_dump(
                 {
                     "config": {
-                        "order_text": [int(x) for x in self.order_text.split(" ") if x.strip().isdigit()],
+                        "order_text": [
+                            int(x)
+                            for x in self.order_text.split(" ")
+                            if x.strip().isdigit()
+                        ],
                         "angle": self._safe_float(self.angle, 1.0),
                         "difficulty": self.diffi,
                         "fate": self.fate,
@@ -177,6 +213,3 @@ class Config:
 
 
 config = Config()
-
-
-

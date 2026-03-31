@@ -1,5 +1,5 @@
 import time
-from logging import getLogger, FileHandler, Formatter, INFO
+from logging import INFO, FileHandler, Formatter, getLogger
 from pathlib import Path
 
 from asu.core.common.paths import logs_path
@@ -15,4 +15,3 @@ filename = Path(logs_path()) / (
 file_handler = FileHandler(filename=filename, mode="w", encoding="utf-8")
 file_handler.setFormatter(Formatter(logging_format))
 map_log.addHandler(file_handler)
-

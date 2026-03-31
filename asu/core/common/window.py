@@ -95,5 +95,3 @@ def wait_game_window_state(
                 on_exception(exc)
             if exception_sleep > 0:
                 time.sleep(exception_sleep)
-
-

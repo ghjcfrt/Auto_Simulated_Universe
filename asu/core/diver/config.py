@@ -40,7 +40,21 @@ class Config:
         self.team = "终结技"
         self.timezones = ["America", "Asia", "Europe", "Default"]
         self.timezone = "Default"
-        self.origin_key = ["f", "m", "shift", "v", "e", "w", "a", "s", "d", "1", "2", "3", "4"]
+        self.origin_key = [
+            "f",
+            "m",
+            "shift",
+            "v",
+            "e",
+            "w",
+            "a",
+            "s",
+            "d",
+            "1",
+            "2",
+            "3",
+            "4",
+        ]
         self.mapping = list(self.origin_key)
         self.max_run = 34
         self.match = self._load_json(self._project_path("actions", "character.json"))
@@ -125,8 +139,12 @@ class Config:
             self.angle = str(config_data.get("angle", self.angle))
             self.difficult = str(config_data.get("difficulty", self.difficult))
             self.team = str(config_data.get("team", self.team))
-            self.speed_mode = self._safe_int(config_data.get("speed_mode"), self.speed_mode)
-            self.weekly_mode = self._safe_int(config_data.get("weekly_mode"), self.weekly_mode)
+            self.speed_mode = self._safe_int(
+                config_data.get("speed_mode"), self.speed_mode
+            )
+            self.weekly_mode = self._safe_int(
+                config_data.get("weekly_mode"), self.weekly_mode
+            )
             self.cpu_mode = self._safe_int(config_data.get("cpu_mode"), self.cpu_mode)
             self.timezone = str(config_data.get("timezone", self.timezone))
             self.max_run = self._safe_int(config_data.get("max_run"), self.max_run)
@@ -177,6 +195,3 @@ class Config:
 
 
 config = Config()
-
-
-

@@ -1,6 +1,7 @@
 import ctypes
 import time
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 
 import win32con
 import win32gui
@@ -19,8 +20,8 @@ def wait_game_window_state(
     resolution_detail: bool = False,
     success_sleep: float = 0.0,
     exception_sleep: float = 0.0,
-    on_exception: Optional[Callable[[Exception], None]] = None,
-) -> Dict[str, Any]:
+    on_exception: Callable[[Exception], None] | None = None,
+) -> dict[str, Any]:
     """等待游戏窗口可用并返回窗口几何信息。"""
     log.warning("等待游戏窗口")
     while True:

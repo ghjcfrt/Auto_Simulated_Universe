@@ -1,7 +1,6 @@
 import os
 import sys
 import time
-from typing import Optional, Tuple
 
 import pythoncom
 import win32com.client
@@ -11,7 +10,7 @@ from asu.core.common.paths import logs_path
 from asu.core.platform.log import log
 
 
-def _read_notif_state(file_path: str) -> Tuple[Optional[str], Optional[str]]:
+def _read_notif_state(file_path: str) -> tuple[str | None, str | None]:
     """读取通知计数与时间戳，读取失败时返回空值。"""
     try:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as fh:

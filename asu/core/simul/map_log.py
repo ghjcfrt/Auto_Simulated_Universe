@@ -1,14 +1,15 @@
 import time
 from logging import getLogger, FileHandler, Formatter, INFO
+from pathlib import Path
 
-from asu.core.platform.log import logs_path
+from asu.core.common.paths import logs_path
 
 map_log = getLogger("map_logger")
 map_log.setLevel(INFO)
 logging_format = "[%(levelname)s] [%(asctime)s] %(message)s"
 
 # 根据日期生成日志文件名
-filename = logs_path / (
+filename = Path(logs_path()) / (
     "log_" + time.strftime("%Y-%m-%d-%H-%M", time.localtime()) + ".txt"
 )
 file_handler = FileHandler(filename=filename, mode="w", encoding="utf-8")

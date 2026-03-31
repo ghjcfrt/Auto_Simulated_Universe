@@ -1,7 +1,7 @@
 import json
 import os
 import sys
-from typing import Any, Dict, List
+from typing import Any
 
 import yaml
 
@@ -64,7 +64,7 @@ class Config:
             return default
 
     @staticmethod
-    def _load_yaml(path: str) -> Dict[str, Any]:
+    def _load_yaml(path: str) -> dict[str, Any]:
         try:
             with open(path, "r", encoding="utf-8", errors="ignore") as f:
                 data = yaml.safe_load(f)
@@ -73,7 +73,7 @@ class Config:
         return data if isinstance(data, dict) else {}
 
     @staticmethod
-    def _load_json(path: str) -> Dict[str, Any]:
+    def _load_json(path: str) -> dict[str, Any]:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -103,7 +103,7 @@ class Config:
         translator = str.maketrans("", "", symbols)
         return text.translate(translator)
 
-    def update_skill(self, skill: List[str]):
+    def update_skill(self, skill: list[str]):
         self.skill_char = []
         for char_name in skill:
             cleaned_name = self.clean_text(str(char_name), 0)

@@ -1,7 +1,7 @@
 import copy
 import os
 import sys
-from typing import Any, Dict, List
+from typing import Any
 
 import yaml
 
@@ -55,7 +55,7 @@ class Config:
             return default
 
     @staticmethod
-    def _load_yaml(path: str) -> Dict[str, Any]:
+    def _load_yaml(path: str) -> dict[str, Any]:
         try:
             with open(path, "r", encoding="utf-8", errors="ignore") as f:
                 data = yaml.safe_load(f)
@@ -63,7 +63,7 @@ class Config:
             return {}
         return data if isinstance(data, dict) else {}
 
-    def _load_secondary_fate(self) -> List[str]:
+    def _load_secondary_fate(self) -> list[str]:
         for filename in [self.text, "info_example_old.yml"]:
             yaml_data = self._load_yaml(self._project_path(filename))
             config = yaml_data.get("config")
@@ -73,7 +73,7 @@ class Config:
                     return [str(item) for item in secondary_fate]
         return list(DEFAULT_SECONDARY_FATE)
 
-    def _load_prior(self) -> Dict[str, Any]:
+    def _load_prior(self) -> dict[str, Any]:
         for filename in [self.text, "info_example_old.yml"]:
             yaml_data = self._load_yaml(self._project_path(filename))
             prior = yaml_data.get("prior")
@@ -92,8 +92,8 @@ class Config:
         return angle_value
 
     @property
-    def order(self) -> List[int]:
-        order_numbers: List[int] = []
+    def order(self) -> list[int]:
+        order_numbers: list[int] = []
         for token in self.order_text.strip().split():
             try:
                 order_numbers.append(int(token))

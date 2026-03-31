@@ -1,27 +1,27 @@
-# Project Structure
+# 项目结构
 
-## Goals
-- Keep entry commands simple and obvious.
-- Make source layout readable at a glance.
-- Separate app orchestration, domain logic, UI, OCR, and assets.
+## 目标
+- 保持入口命令简单直观。
+- 让源码目录一眼可读、职责清晰。
+- 将应用编排、领域逻辑、UI、OCR 与资源文件分层管理。
 
-## Current Layout
-- `diver.py` / `simul.py` / `gui.py` / `align_angle.py` / `notif.py`: thin compatibility entry files.
-- `asu/apps/`: thin compatibility entry modules.
-- `asu/workflows/`: large workflow implementations (`diver`, `simul`).
-- `asu/core/common/`: shared runtime, window state, and interaction helpers.
-- `asu/core/diver/`: 差分宇宙 domain logic and configuration.
-- `asu/core/simul/`: 模拟宇宙 domain logic and configuration.
-- `asu/core/platform/`: platform-facing helpers (`log.py`, `screenshot.py`).
-- `asu/ui/`: GUI layer (Flet views and page helpers).
-- `asu/onnxocr/`: third-party OCR boundary.
-- `asu/assets/models/`: OCR model assets.
-- `actions/`, `imgs/`: runtime action tables and image assets.
+## 当前布局
+- `diver.py` / `simul.py` / `gui.py` / `align_angle.py` / `notif.py`：轻量兼容入口文件。
+- `asu/apps/`：轻量兼容入口模块。
+- `asu/workflows/`：主要流程实现（`diver`、`simul`）。
+- `asu/core/common/`：共享运行时、窗口状态与交互辅助。
+- `asu/core/diver/`：差分宇宙领域逻辑与配置。
+- `asu/core/simul/`：模拟宇宙领域逻辑与配置。
+- `asu/core/platform/`：平台相关辅助（`log.py`、`screenshot.py`）。
+- `asu/ui/`：GUI 层（Flet 页面与通用界面辅助）。
+- `asu/onnxocr/`：第三方 OCR 边界代码。
+- `asu/assets/models/`：OCR 模型资源。
+- `actions/`、`imgs/`：运行时动作表与图片资源。
 
-## Rules For New Code
-- Put new large flow implementations in `asu/workflows/`, and keep `asu/apps/` thin.
-- Keep repository-root python files as wrappers only.
-- Keep reusable core logic under `asu/core/`.
-- Keep UI code in `asu/ui/` and avoid mixing business logic into UI modules.
-- Keep OCR vendor code inside `asu/onnxocr/` and business logic outside of it.
-- Keep large constant tables in dedicated `constants.py` files in each domain package.
+## 新代码规则
+- 新增的大型流程实现放在 `asu/workflows/`，`asu/apps/` 保持轻量。
+- 仓库根目录下的 Python 文件仅作为包装入口。
+- 可复用核心逻辑统一放在 `asu/core/`。
+- UI 代码放在 `asu/ui/`，避免将业务逻辑混入 UI 模块。
+- OCR 供应商代码保持在 `asu/onnxocr/` 内，业务逻辑放在其外部。
+- 大型常量表放在各领域包专用的 `constants.py` 中。

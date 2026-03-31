@@ -271,7 +271,12 @@ class UniverseUtils:
         return common_get_local(self, x, y, size, large=large)
 
     def format_path(self, path):
-        return img_path(f"{path}.jpg")
+        if path.lower().endswith((".jpg", ".jpeg", ".png")):
+            return img_path(path)
+        jpg_path = Path(img_path(f"{path}.jpg"))
+        if jpg_path.exists():
+            return str(jpg_path)
+        return img_path(f"{path}.png")
 
     # 判断截图中匹配中心点附近是否存在匹配模板
     # 模板匹配参数：模板路径、中心点、遮罩区域与匹配阈值

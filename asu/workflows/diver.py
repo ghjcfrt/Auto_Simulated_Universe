@@ -3,6 +3,7 @@ import csv
 import datetime
 import json
 import os
+import re
 import time
 import traceback
 from collections import defaultdict
@@ -16,11 +17,13 @@ import pyuac
 import win32api
 import win32con
 import win32gui
+import yaml
 
 import asu.core.diver.keyops as keyops
-from asu.core.common.paths import actions_path, logs_path
+from asu.core.common.paths import actions_path, img_path, logs_path, project_path
 from asu.core.diver.args import args
 from asu.core.diver.config import config
+from asu.core.diver.constants import DEFAULT_PORTAL_PRIOR
 from asu.core.diver.keyops import KeyController
 from asu.core.diver.utils import UniverseUtils, notif, set_forground
 from asu.core.platform.log import log, print_exc, set_debug
@@ -371,8 +374,9 @@ class DivergentUniverse(UniverseUtils):
                 self.area_text,
                 [
                     "事件",
+                    "铸造",
                     "奖励",
-                    "遭遇",
+                    "异常",
                     "商店",
                     "首领",
                     "战斗",
@@ -398,7 +402,7 @@ class DivergentUniverse(UniverseUtils):
             "奖励": 3,
             "事件": 3,
             "战斗": 2,
-            "遭遇": 2,
+            "异常": 2,
             "商店": 1,
             "财富": 1,
         }
@@ -409,7 +413,7 @@ class DivergentUniverse(UniverseUtils):
                 "奖励": 2,
                 "事件": 2,
                 "战斗": 1,
-                "遭遇": 1,
+                "异常": 1,
             }
             if (self.quan or self.bai_e) and self.allow_e:
                 prefer_portal["战斗"] = 2
@@ -450,6 +454,248 @@ class DivergentUniverse(UniverseUtils):
 
     def portal_bias(self, portal):
         return (portal["box"][0] + portal["box"][1]) // 2 - 950
+
+    def in_battle(self):
+        return self.check("c", 0.988, 0.1528, threshold=0.825)
+
+    def wait_battle_end(self, timeout=120):
+        tm = time.time()
+        while time.time() - tm < timeout:
+            self.get_screen()
+            self.run_static()
+            if not self.in_battle():
+                time.sleep(0.5)
+                self.get_screen()
+                if not self.in_battle():
+                    return 1
+            time.sleep(0.2)
+        return 0
+
+    # 战斗位面处理：触发战斗并等待结束
+    def handle_battle_area(self, enter_timeout=18):
+        tm = time.time()
+        while time.time() - tm < enter_timeout:
+            if self._stop:
+                return 0
+            self.get_screen()
+            if self.in_battle():
+                break
+            self.press("w", 0.5)
+            pyautogui.click()
+            time.sleep(0.15)
+        self.get_screen()
+        if self.in_battle():
+            return self.wait_battle_end()
+        return 1
+
+    # 新差分找门
+    def _ensure_door_templates(self):
+        if hasattr(self, "door_templates"):
+            return
+        self.door_templates = {}
+        widths = []
+        for i in range(1, 5):
+            tpl = cv.imread(img_path("divergent", f"door{i}.png"))
+            if tpl is not None:
+                self.door_templates[i] = tpl
+                widths.append((i, tpl.shape[1]))
+        if widths:
+            width_set = {w for _, w in widths}
+            if len(width_set) > 1:
+                log.warning(f"door模板宽度不一致，建议统一：{widths}")
+
+    def _match_single_door_tpl(self, roi_edge, tpl_edge, tpl_id, scale):
+        roi_h, roi_w = roi_edge.shape[:2]
+        th, tw = tpl_edge.shape[:2]
+        rw, rh = max(1, int(tw * scale)), max(1, int(th * scale))
+        if rw >= roi_w or rh >= roi_h:
+            return None
+
+        scaled = cv.resize(tpl_edge, (rw, rh), interpolation=cv.INTER_LINEAR)
+        result = cv.matchTemplate(roi_edge, scaled, cv.TM_CCOEFF_NORMED)
+        _, conf, _, max_loc = cv.minMaxLoc(result)
+        center_x = max_loc[0] + rw / 2
+        return {
+            "tpl_id": tpl_id,
+            "scale": scale,
+            "conf": conf,
+            "center_x": center_x,
+            "width": rw,
+        }
+
+    def _scan_door_templates(self, roi_edge):
+        self._ensure_door_templates()
+        best = None
+        # 模板优先级：1 -> 2 -> 3 -> 4
+        for tpl_id in sorted(self.door_templates.keys()):
+            tpl = self.door_templates[tpl_id]
+            tpl_edge = cv.Canny(tpl, 50, 150)
+            for scale in [0.85, 1.0, 1.15]:
+                match = self._match_single_door_tpl(roi_edge, tpl_edge, tpl_id, scale)
+                if match is None:
+                    continue
+                if best is None:
+                    best = match
+                    continue
+                # 同分数时偏向编号更小模板（门更近）
+                best_score = best["conf"] - 0.015 * (best["tpl_id"] - 1)
+                cur_score = match["conf"] - 0.015 * (match["tpl_id"] - 1)
+                if cur_score > best_score:
+                    best = match
+            if best is not None and best["tpl_id"] == tpl_id and best["conf"] > 0.82:
+                break
+        return best
+
+    def _match_locked_template_first(self, roi_edge):
+        self._ensure_door_templates()
+        prefer_tpl = None
+        if hasattr(self, "last_tpl") and self.last_tpl in self.door_templates:
+            prefer_tpl = self.last_tpl
+        elif hasattr(self, "locked_tpl") and self.locked_tpl in self.door_templates:
+            prefer_tpl = self.locked_tpl
+
+        if prefer_tpl is None:
+            return None
+
+        tpl = self.door_templates[prefer_tpl]
+        tpl_edge = cv.Canny(tpl, 50, 150)
+        base_scale = getattr(self, "locked_scale", 1.0)
+        scales = [
+            max(0.75, base_scale * 0.92),
+            base_scale,
+            min(1.25, base_scale * 1.08),
+        ]
+        best = None
+        for scale in scales:
+            match = self._match_single_door_tpl(
+                roi_edge, tpl_edge, prefer_tpl, float(scale)
+            )
+            if match is not None and (best is None or match["conf"] > best["conf"]):
+                best = match
+        return best
+
+    def _validate_door_structure(self, roi_raw, center_x):
+        # 轻量结构校验：中心两侧应存在更多黄色而非粉色
+        hsv = cv.cvtColor(roi_raw, cv.COLOR_BGR2HSV)
+        h, w = roi_raw.shape[:2]
+        cx = int(max(0, min(w - 1, center_x)))
+        left0, left1 = max(0, cx - 28), max(1, cx - 8)
+        right0, right1 = min(w - 1, cx + 8), min(w, cx + 28)
+        if left0 >= left1 or right0 >= right1:
+            return False
+        band = np.concatenate([hsv[:, left0:left1], hsv[:, right0:right1]], axis=1)
+
+        yellow = cv.inRange(band, np.array([18, 70, 90]), np.array([42, 255, 255]))
+        pink = cv.inRange(band, np.array([140, 60, 80]), np.array([175, 255, 255]))
+        y_cnt = int(np.sum(yellow > 0))
+        p_cnt = int(np.sum(pink > 0))
+        return y_cnt > 30 and y_cnt > p_cnt * 1.4
+
+    def _get_door_match(self, roi_raw):
+        roi_edge = cv.Canny(roi_raw, 50, 150)
+
+        # 优先使用上一帧模板，避免每帧切模板
+        locked_match = self._match_locked_template_first(roi_edge)
+        if locked_match is not None:
+            last_conf = getattr(self, "last_conf", 1.0)
+            conf_drop = last_conf - locked_match["conf"]
+            if locked_match["conf"] > 0.6 and conf_drop < 0.17:
+                return locked_match
+
+        # 丢失或置信下降明显，才切换模板
+        return self._scan_door_templates(roi_edge)
+
+    # 新差分找门
+    def align_to_door(self, timeout=8):
+        tm = time.time()
+        if not hasattr(self, "door_center"):
+            self.door_center = None
+        if not hasattr(self, "door_miss_frames"):
+            self.door_miss_frames = 0
+        while time.time() - tm < timeout:
+            if self._stop:
+                return 0
+            self.get_screen()
+            roi = self.screen[115:920, 900:1030]
+            match = self._get_door_match(roi)
+            if match is None:
+                self.door_miss_frames += 1
+                self.mouse_move(6)
+                time.sleep(0.2)
+                continue
+
+            conf = match["conf"]
+            new_center = match["center_x"]
+            structure_ok = self._validate_door_structure(roi, new_center)
+
+            accepted = False
+            if conf > 0.75:
+                accepted = True
+            elif conf > 0.6 and self.door_center is not None:
+                # 中置信：结合上一帧
+                new_center = 0.6 * self.door_center + 0.4 * new_center
+                accepted = True
+
+            if accepted and structure_ok:
+                if self.door_center is None:
+                    self.door_center = new_center
+                else:
+                    # 中心平滑
+                    self.door_center = 0.7 * self.door_center + 0.3 * new_center
+                self.door_miss_frames = 0
+                self.locked_tpl = match["tpl_id"]
+                self.last_tpl = match["tpl_id"]
+                self.locked_scale = match["scale"]
+                self.last_conf = conf
+            else:
+                self.door_miss_frames += 1
+                if self.door_miss_frames >= 3:
+                    self.locked_tpl = None
+                self.mouse_move(4)
+                time.sleep(0.12)
+                continue
+
+            # 以“游戏画面中心”为目标，而不是显示器中心。
+            roi_x0 = 900
+            game_center_x = self.screen.shape[1] / 2
+            game_center_in_roi = game_center_x - roi_x0
+            bias = self.door_center - game_center_in_roi
+            # 死区防抖
+            if abs(bias) < 10 and conf > 0.6:
+                log.info(
+                    f"门对准完成 tpl=door{self.locked_tpl} conf={conf:.3f} center={self.door_center:.1f}"
+                )
+                return 1
+
+            move_angle = max(-10, min(10, int(bias / 16)))
+            if move_angle == 0:
+                move_angle = 1 if bias > 0 else -1
+            self.mouse_move(move_angle)
+            time.sleep(0.12)
+        return 0
+
+    def move_forward_to_door_f(self, timeout=20):
+        keyops.keyDown("w")
+        tm = time.time()
+        while time.time() - tm < timeout:
+            if self._stop:
+                keyops.keyUp("w")
+                return 0
+            self.get_screen()
+            if self.in_battle():
+                keyops.keyUp("w")
+                if not self.wait_battle_end():
+                    return 0
+                keyops.keyDown("w")
+                continue
+            if self.check_f(check_text=0):
+                keyops.keyUp("w")
+                self.press("f")
+                time.sleep(0.3)
+                return 1
+            time.sleep(0.08)
+        keyops.keyUp("w")
+        return 0
 
     def aim_portal(self, portal):
         zero = bisect.bisect_left(config.angles, 0)
@@ -514,6 +760,53 @@ class DivergentUniverse(UniverseUtils):
         keyops.keyUp("w")
         return 0
 
+    def handle_forge_area(self, timeout=10):
+        tm = time.time()
+        while time.time() - tm < timeout:
+            if self._stop:
+                return 0
+            self.get_screen()
+            if self.check_f(is_in=["造物调试台"]):
+                self.press("a", 1)
+                self.press("w", 1)
+                self.press("d", 1)
+                return 1
+            keyops.keyDown("w")
+            time.sleep(0.4)
+            keyops.keyUp("w")
+            time.sleep(0.1)
+        return 0
+
+    def recover_after_align_fail(self):
+        # 对门失败时，执行双向小机动并短超时重试，避免单向偏移导致持续识别失败。
+        side_key = "d" if self.portal_cnt % 2 else "a"
+        side_yaw = 8 if side_key == "d" else -8
+
+        keyops.keyDown(side_key)
+        time.sleep(0.35)
+        keyops.keyUp(side_key)
+
+        keyops.keyDown("w")
+        time.sleep(0.2)
+        keyops.keyUp("w")
+
+        self.mouse_move(side_yaw)
+        if self.align_to_door(timeout=3):
+            return 1
+
+        opposite_key = "a" if side_key == "d" else "d"
+        keyops.keyDown(opposite_key)
+        time.sleep(0.45)
+        keyops.keyUp(opposite_key)
+
+        self.mouse_move(-side_yaw * 2)
+
+        keyops.keyDown("w")
+        time.sleep(0.2)
+        keyops.keyUp("w")
+
+        return self.align_to_door(timeout=3)
+
     # 这个方法是通过本层么?
     def portal_opening_days(self, aimed=0, static=0, deep=0):
         if deep > 1:
@@ -522,78 +815,22 @@ class DivergentUniverse(UniverseUtils):
             return
         if deep == 0:
             self.portal_cnt += 1
-        portal = {"score": 0, "nums": 0, "type": ""}
-        moving = 0
-        if static:
-            angles = [0, 90, 90, 90, 45, -90, -90, -90, -45]
-            for i, angle in enumerate(angles):
-                self.mouse_move(angle)
-                time.sleep(0.2)
-                portal = self.find_portal()
-                if portal["score"]:
-                    break
-            if self.floor in [1, 2, 4, 5, 6, 7, 9, 10]:
-                if portal["nums"] == 1 and portal["score"] < 2:
-                    portal_pre = portal
-                    portal_type = portal["type"]
-                    bias = 0
-                    for i in range(i + 1, len(angles)):
-                        self.mouse_move(angles[i])
-                        bias += angles[i]
-                        time.sleep(0.2)
-                        portal_after = self.find_portal()
-                        if (
-                            portal_after["score"]
-                            and portal_type != portal_after["type"]
-                        ):
-                            portal = portal_after
-                            break
-                    if portal["type"] == portal_type:
-                        portal = portal_pre
-                        self.mouse_move(-bias)
-        tm = time.time()
-        while time.time() - tm < 5 + 2 * (portal["score"] != 0):
-            if aimed == 0:
-                if portal["score"] == 0:
-                    portal = self.find_portal()
-            else:
-                if self.forward_until(
-                    [portal["type"]] if portal["score"] else ["区域", "结束", "退出"],
-                    timeout=2.5,
-                    moving=moving,
-                ):
-                    self.init_floor()
-                    return
-                else:
-                    keyops.keyUp("w")
-                    moving = 0
-                    self.press("d", 0.6)
-                    self.portal_opening_days(aimed=0, static=1, deep=deep + 1)
-                    return
-            if portal["score"] and not aimed:
-                if moving:
-                    print("stop moving")
-                    keyops.keyUp("w")
-                    moving = 0
-                    self.press("s", min(max(self.ocr_time_list), 0.4))
-                    continue
-                else:
-                    print("aiming...")
-                    tmp_portal = self.aim_portal(portal)
-                    if tmp_portal["score"] == 0:
-                        self.portal_opening_days(aimed=0, static=1, deep=deep + 1)
-                        return
-                    else:
-                        portal = tmp_portal
-                        aimed = 1
-                    moving = 1
-                    keyops.keyDown("w")
-            elif portal["score"] == 0:
-                if not moving:
-                    keyops.keyDown("w")
-                    moving = 1
-        if moving:
-            keyops.keyUp("w")
+
+        # 新版差分宇宙：不再依赖地图，采用“处理结束后 -> 门模板对准 -> 直行到F交互”。
+        # 注意：战斗处理仅在战斗位面中通过 handle_battle_area 执行。
+
+        aligned = self.align_to_door()
+        if not aligned:
+            aligned = self.recover_after_align_fail()
+            if not aligned:
+                log.warning("门对准失败，进入盲走交互兜底")
+
+        if self.move_forward_to_door_f():
+            self.init_floor()
+            return
+
+        self.close_and_exit(click=self.fail_count > 1)
+        self.fail_count += 1
 
     def event_score(self, text, event):
         score = 0
@@ -716,6 +953,141 @@ class DivergentUniverse(UniverseUtils):
                     self.click((0.9479, 0.9565))
                     self.click((0.9479, 0.9565))
                 self.ts.forward(self.get_screen())
+
+    def _get_next_priority(self):
+        # 用户优先级来源：程序根目录 info.yml。
+        prior = None
+        try:
+            with open(
+                project_path("info.yml"), "r", encoding="utf-8", errors="ignore"
+            ) as f:
+                yaml_data = yaml.safe_load(f)
+            if isinstance(yaml_data, dict):
+                cfg = yaml_data.get("config")
+                if isinstance(cfg, dict):
+                    portal_prior = cfg.get("portal_prior")
+                    if isinstance(portal_prior, dict) and portal_prior:
+                        prior = portal_prior
+        except Exception:
+            pass
+
+        if not isinstance(prior, dict) or len(prior) == 0:
+            prior = dict(DEFAULT_PORTAL_PRIOR)
+        else:
+            merged = dict(DEFAULT_PORTAL_PRIOR)
+            merged.update(prior)
+            prior = merged
+        return sorted(prior.keys(), key=lambda x: prior.get(x, -999), reverse=True)
+
+    def _scan_next_candidates(self, priority):
+        roi = [594, 1337, 738, 782]
+        texts = self.ts.find_with_box(roi, forward=1, mode=2)
+        candidates = {}
+        for item in texts:
+            raw_text = str(item.get("raw_text", ""))
+            if "首领" in raw_text:
+                candidates["首领"] = item
+                continue
+            for area_type in priority:
+                if area_type in raw_text:
+                    candidates[area_type] = item
+                    break
+        return candidates
+
+    def _pick_best_visible_next(self, candidates, priority):
+        for area_type in priority:
+            if area_type in candidates:
+                return area_type
+        return None
+
+    def _list_visible_next_by_priority(self, candidates, priority, max_options=3):
+        visible = [area_type for area_type in priority if area_type in candidates]
+        return visible[:max_options]
+
+    def _get_reroll_count(self):
+        # 用户只提供了 (678, 945) 参考点，这里使用其附近 ROI 识别“重抽 N”。
+        reroll_roi = [560, 900, 920, 980]
+        texts = self.ts.find_with_box(reroll_roi, forward=1, mode=2)
+        merged = self.merge_text(texts, char=0)
+        if "重抽" not in merged:
+            return None
+        match = re.search(r"重抽\D*(\d+)", merged)
+        if match is None:
+            return None
+        return int(match.group(1))
+
+    def next(self):
+        priority = self._get_next_priority()
+        self.get_screen()
+        candidates = self._scan_next_candidates(priority)
+
+        # 首领层不会出现其他可选项：直接点击并使用首领专用确认坐标
+        if "首领" in candidates:
+            self.click_box(candidates["首领"]["box"])
+            time.sleep(0.2)
+            self.click_position([690, 963])
+            return 1
+
+        visible = self._list_visible_next_by_priority(candidates, priority)
+        if visible:
+            log.info(f"下一站识别候选数量: {len(visible)}，候选: {visible}")
+        else:
+            log.warning("选择下一站：未识别到可用词汇坐标")
+            return 0
+
+        top_two = priority[:2]
+        for area_type in top_two:
+            if area_type in candidates:
+                self.click_box(candidates[area_type]["box"])
+                return 1
+
+        if len(top_two) == 2:
+            log.info(f"前两优先级均未出现: {top_two}")
+
+        reroll_count = self._get_reroll_count()
+        if reroll_count is not None and reroll_count > 0:
+            # 若 OCR 未给出“重抽”框坐标，回退为当前候选最高优先级并确认。
+            reroll_box = None
+            reroll_texts = self.ts.find_with_box(
+                [560, 900, 920, 980], forward=1, mode=2
+            )
+            for item in reroll_texts:
+                if "重抽" in str(item.get("raw_text", "")):
+                    reroll_box = item["box"]
+                    break
+            if reroll_box is not None:
+                self.click_box(reroll_box)
+            else:
+                best_type = self._pick_best_visible_next(candidates, priority)
+                if best_type is None:
+                    log.warning("未识别到“重抽”坐标，且当前无可用候选")
+                    return 0
+                log.warning(f"未识别到“重抽”坐标，回退选择当前最高优先级：{best_type}")
+                self.click_box(candidates[best_type]["box"])
+                time.sleep(0.2)
+                self.click_position([1156, 970])
+                return 1
+
+            time.sleep(0.5)
+            self.get_screen()
+            candidates = self._scan_next_candidates(priority)
+            visible = self._list_visible_next_by_priority(candidates, priority)
+            if visible:
+                log.info(f"重抽后识别候选数量: {len(visible)}，候选: {visible}")
+            for area_type in priority[:2]:
+                if area_type in candidates:
+                    self.click_box(candidates[area_type]["box"])
+                    return 1
+
+        # 无可重抽次数（或重抽后仍无前二）时，按优先级选可见项并点击“确定”。
+        final_type = self._pick_best_visible_next(candidates, priority)
+        if final_type is None:
+            return 0
+
+        self.click_box(candidates[final_type]["box"])
+        time.sleep(0.2)
+        self.click_position([1156, 970])
+        return 1
 
     def find_event_text(self, save=0):
         self.get_screen()
@@ -978,7 +1350,38 @@ class DivergentUniverse(UniverseUtils):
             f"floor:{self.floor}, state:{self.area_state}, area:{area_now}, text:{self.area_text}"
         )
 
-        if area_now in ["事件", "奖励", "遭遇"]:
+        if area_now in ["事件", "异常"]:
+            # 异常层：先前进触发 F 的“事件”，事件结束后再找门进入下一层。
+            if self.area_state == 0:
+                pyautogui.click()
+                self.check_pop()
+                time.sleep(0.4)
+
+                # 先尝试直行触发 F 事件交互。
+                if not self.forward_until(["事件"], timeout=8, moving=0, chaos=1):
+                    # 兜底：若未触发到交互，尝试按事件对齐逻辑再触发一次。
+                    self.align_event("d", click=1)
+
+                time.sleep(0.4)
+                self.get_screen()
+                if "事件" in self.merge_text(self.ts.find_with_box([92, 195, 54, 88])):
+                    self.event()
+
+                self.area_state = 1
+
+            self.portal_opening_days(static=1)
+
+        elif area_now in ["铸造"]:
+            if self.area_state == 0:
+                pyautogui.click()
+                self.check_pop()
+                time.sleep(0.4)
+                self.handle_forge_area()
+                self.area_state = 1
+
+            self.portal_opening_days(static=1)
+
+        elif area_now in ["奖励"]:
             # 如果存在大黑塔,还是切过来,毕竟这些事件都可能入战
             if self.da_hei_ta and self.allow_e and not self.da_hei_ta_effecting:
                 self.skill()
@@ -1135,35 +1538,25 @@ class DivergentUniverse(UniverseUtils):
                 self.da_hei_ta_effecting = True
 
             if self.area_state == 0:
-                keyops.keyDown("w")
-                time.sleep(0.2)
-                keyops.keyDown("shift")
-                tm = time.time()
-                while time.time() - tm < 3:
-                    self.get_screen()
-                    if self.check(
-                        "divergent/z", 0.5771, 0.9546, mask="mask_z", threshold=0.96
-                    ):
-                        break
-                time.sleep(0.8)
-                keyops.keyUp("w")
-                keyops.keyUp("shift")
                 if self.quan and self.allow_e:
                     for _ in range(4):
                         self.skill(1)
-                    self.press("w")
                     time.sleep(1.5)
                 elif self.bai_e and self.allow_e:
                     for _ in range(4):
                         self.skill(1)
                     time.sleep(1.5)
-                else:
-                    pyautogui.click()
-                self.area_state += 1
-            else:
-                if not ((self.quan or self.bai_e) and self.allow_e):
-                    self.press("w", 0.25)
-                self.portal_opening_days(static=1)
+
+                if not self.handle_battle_area():
+                    self.close_and_exit(click=self.fail_count > 1)
+                    self.fail_count += 1
+                    return 1
+
+                self.area_state = 1
+
+            if not ((self.quan or self.bai_e) and self.allow_e):
+                self.press("w", 0.25)
+            self.portal_opening_days(static=1)
 
         elif area_now == "财富":
             keyops.keyDown("w")
@@ -1216,6 +1609,54 @@ class DivergentUniverse(UniverseUtils):
     def bless_blood(self):
         self.bless(blood=1)
 
+    def will_full(self):
+        self.get_screen()
+        if not self.click_img("new"):
+            self.click((0.5, 0.5))
+        time.sleep(0.2)
+        self.click_position([960, 975])
+        time.sleep(1)
+
+    def bless_mask(self):
+        self.bless_solved = 1
+        self.get_screen()
+        target = cv.imread(img_path("divergent", "mask.png"))
+        if target is None:
+            log.warning("未找到模板图片 imgs/divergent/mask.png")
+            return 0
+
+        result = cv.matchTemplate(self.screen, target, cv.TM_CCORR_NORMED)
+        ys, xs = np.where(result >= 0.95)
+        if len(xs) == 0:
+            return 0
+
+        # 选择第一个匹配点（从上到下、从左到右）
+        y, x = sorted(zip(ys.tolist(), xs.tolist()), key=lambda p: (p[0], p[1]))[0]
+        self.click_position((x + target.shape[1] // 2, y + target.shape[0] // 2))
+        self.click_position([1695, 962])
+        time.sleep(0.3)
+        return 1
+
+    def choose_site_card(self):
+        self.bless_solved = 1
+        self.get_screen()
+        target = cv.imread(img_path("divergent", "1.png"))
+        if target is None:
+            log.warning("未找到模板图片 imgs/divergent/1.png")
+            return 0
+
+        result = cv.matchTemplate(self.screen, target, cv.TM_CCORR_NORMED)
+        ys, xs = np.where(result >= 0.95)
+        if len(xs) == 0:
+            return 0
+
+        # 选择第一个匹配点（从上到下、从左到右）
+        y, x = sorted(zip(ys.tolist(), xs.tolist()), key=lambda p: (p[0], p[1]))[0]
+        self.click_position((x + target.shape[1] // 2, y + target.shape[0] // 2))
+        self.click_position([1629, 936])
+        time.sleep(0.3)
+        return 1
+
     def bless(self, reverse=1, blood=0):
         self.bless_solved = 1
         # 屏幕下方
@@ -1244,7 +1685,7 @@ class DivergentUniverse(UniverseUtils):
         blesses = sorted(blesses, key=lambda x: x["score"], reverse=reverse)
         print(blesses)
         box = blesses[0]["box"]
-        if not self.click_img("new"):
+        if not (self.click_img("new") or self.click_img("divergent/suggested")):
             self.click_position([(box[0] + box[1]) // 2, 500])
         if blood:
             self.click_position([960, 975])

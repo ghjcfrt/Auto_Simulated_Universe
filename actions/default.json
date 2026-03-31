@@ -182,6 +182,15 @@
         "actions": ["bless_blood"]
     },
     {
+        "name":"欢愉假面"
+        ,"trigger":{
+            "text": "欢愉假面",
+            "box": [98, 207, 60, 98],
+            "redundancy": 30
+        },
+        "actions": ["bless_mask"]
+    },
+    {
         "name": "祝福选择",
         "trigger":{
             "text": "祝福",
@@ -189,6 +198,24 @@
             "redundancy": 30
         },
         "actions": ["bless"]
+    },
+    {
+        "name": "愿力满盈",
+        "trigger":{
+            "text": "愿力满盈",
+            "box": [98, 209, 61, 101],
+            "redundancy": 30
+        },
+        "actions": ["will_full"]
+    },
+    {
+        "name": "选择站点卡",
+        "trigger":{
+            "text": "选择站点卡",
+            "box": [98, 234, 61, 101],
+            "redundancy": 30
+        },
+        "actions": ["choose_site_card"]
     },
     {
         "name": "加权奇物选择",
@@ -212,6 +239,15 @@
             "redundancy": 30
         },
         "actions": ["event"] 
+    },
+    {
+        "name": "选择下一站",
+        "trigger":{
+            "text": "选择下一站",
+            "box": [99, 230, 62, 102],
+            "redundancy": 30
+        },
+        "actions": ["next"] 
     },
     {
         "name": "奇物大转盘",
@@ -482,7 +518,7 @@
         "name": "点击空白处关闭",
         "trigger":{
             "text": "空白",
-            "box": [867, 1037, 981, 1008],
+            "box": [867, 1057, 981, 1022],
             "redundancy": 60
         },
         "actions":
@@ -500,6 +536,23 @@
         "trigger":{
             "text": "空白",
             "box": [868, 1035, 803, 829],
+            "redundancy": 60
+        },
+        "actions":
+        [
+            {
+                "text": "点击空白"
+            },
+            {
+                "sleep": 1
+            }
+        ]
+    },
+    {
+        "name": "点击空白处关闭",
+        "trigger":{
+            "text": "空白",
+            "box": [865, 1058, 869, 916],
             "redundancy": 60
         },
         "actions":

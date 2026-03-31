@@ -102,9 +102,6 @@ def choose_view(page: Page):
             run(page.su.stop)
         notif("已退出自动化", txt)
 
-    def start_abyss(_e):
-        page.go("/abyss")
-
     def stops(_e):
         show_snack_bar(page, "停止运行（>∀<）", ft.colors.GREEN)
         try:

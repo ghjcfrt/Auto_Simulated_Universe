@@ -141,20 +141,6 @@ Changing your mouse DPI might affect calibration values, in which case, you'll n
 
 Double-click `update.exe`.
 
-### Automatic Abyss
-
-Automatic Abyss allows you to use a fixed team to automatically clear the Oblivion Domains, saving time on manual clearing of the initial levels.
-
-To run the script version, use `python abyss.py`. For the GUI version, click the "Abyss" button on the main interface.
-
-For the script version's first run, modify the `info_example.yml` file in the "abyss" folder to `info.yml`, and edit `info.yml` with your two-team composition. In the GUI version, you can input your team composition in the Abyss interface.
-
-Each team's composition is represented by four numbers.
-
-![Team Composition Numbers](https://github.com/CHNZYX/Auto_Simulated_Universe/blob/main/imgs/team.jpg)
-
-For instance, in the image above, if you want to choose Natasha, Jing Yuan, Seele, and Yan Qing, input: `6 4 3 2`.
-
 ### Notification Plugin Instructions (notif.exe)
 
 If you're not using a local multi-user setup, simply double-click

@@ -3,21 +3,18 @@ from typing import Optional, Union
 import flet as ft
 import win32gui
 
-from asu.apps.abyss import Abyss
 from asu.apps.diver import DivergentUniverse
 from asu.apps.simul import SimulatedUniverse
 
 
 class Page(ft.Page):
     su: Optional[Union[SimulatedUniverse, DivergentUniverse]]
-    ab: Optional[Abyss]
     first: int
     bonus: bool
 
 
 def init_page(page: Page):
     page.su = None
-    page.ab = None
     page.first = 1
 
 

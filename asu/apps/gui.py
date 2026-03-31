@@ -10,7 +10,6 @@ import shutil
 from asu.ui.choose import choose_view
 from asu.ui.config_simul import config_view as config_view_simul
 from asu.ui.config_diver import config_view as config_view_diver
-from asu.ui.abyss import abyss_view
 from asu.ui.common import Page, init_page
 
 
@@ -22,8 +21,6 @@ def main(page: Page):
             config_view_simul(page)
         if e.route == "/config_diver":
             config_view_diver(page)
-        if e.route == '/abyss':
-            abyss_view(page)
         page.update()
 
     def view_pop():

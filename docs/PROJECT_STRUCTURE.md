@@ -6,7 +6,7 @@
 - Separate app orchestration, domain logic, UI, OCR, and assets.
 
 ## Current Layout
-- `diver.py` / `simul.py` / `abyss.py` / `gui.py` / `align_angle.py` / `notif.py`: thin compatibility entry files.
+- `diver.py` / `simul.py` / `gui.py` / `align_angle.py` / `notif.py`: thin compatibility entry files.
 - `asu/apps/`: thin compatibility entry modules.
 - `asu/workflows/`: large workflow implementations (`diver`, `simul`).
 - `asu/core/common/`: shared runtime, window state, and interaction helpers.

@@ -146,20 +146,6 @@ F8/『停止』按鈕停止運行。
 
 雙擊update.exe
 
-### 自動深淵
-
-自動深淵可以使用固定配隊自動刷忘卻之庭，這項功能的目的是節省手動刷前幾層的時間。
-
-代碼版啟動方法為`python abyss.py`，gui版啟動方法為主界面中的「深淵」按鈕。
-
-代碼版第一次運行需要修改abyss文件夾下的info_example.yml為info.yml，並且修改info.yml為自己的兩隊配隊，gui版可以在深淵界面中輸入自己的配隊。
-
-每隊的配隊信息為四個數字
-
-![配隊編號](https://github.com/CHNZYX/Auto_Simulated_Universe/blob/main/imgs/team.jpg)
-
-比如說這張圖中，你想選擇娜塔莎，景元，希兒，彥卿，那麽請在配隊中輸入：`6 4 3 2`
-
 ### 通知插件使用方法（notif.exe）
 
 如果你沒有用本地多用戶，那麽直接雙擊`notif.exe`即可開啟windows通知，每刷完一次都會通知哦

@@ -285,17 +285,26 @@ class UniverseUtils:
             threshold = self.threshold
         path = self.format_path(path)
         target = cv.imread(path)
+        if target is None:
+            log.error(f"模板读取失败: {path}")
+            return False
         if path == img_path("f.jpg") and config.mapping[0] != "f":
             target = self.gen_hotkey_img(config.mapping[0])
             threshold -= 0.01
+        # 某些窗口状态下缩放系数可能短暂异常，至少保证 resize 尺寸为 1。
+        target_w = max(1, int(round(self.scx * target.shape[1])))
+        target_h = max(1, int(round(self.scx * target.shape[0])))
         target = cv.resize(
             target,
-            dsize=(int(self.scx * target.shape[1]), int(self.scx * target.shape[0])),
+            dsize=(target_w, target_h),
         )
         if mask is None:
             shape = target.shape
         else:
             mask_img = cv.imread(self.format_path(mask))
+            if mask_img is None:
+                log.error(f"遮罩读取失败: {mask}")
+                return False
             shape = (
                 int(self.scx * mask_img.shape[0]),
                 int(self.scx * mask_img.shape[1]),
@@ -303,6 +312,19 @@ class UniverseUtils:
         local_screen = self.get_local(x, y, shape, large)
         if large == False:
             return local_screen
+        if (
+            local_screen is None
+            or local_screen.size == 0
+            or local_screen.shape[0] < target.shape[0]
+            or local_screen.shape[1] < target.shape[1]
+        ):
+            log.debug(
+                "模板匹配跳过: local=%s target=%s path=%s",
+                None if local_screen is None else local_screen.shape,
+                target.shape,
+                path,
+            )
+            return False
         result = cv.matchTemplate(local_screen, target, cv.TM_CCORR_NORMED)
         min_val, max_val, min_loc, max_loc = cv.minMaxLoc(result)
         self.tx = (

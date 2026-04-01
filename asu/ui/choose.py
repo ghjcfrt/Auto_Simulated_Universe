@@ -44,11 +44,7 @@ def choose_view(page: Page):
 
     def angle(_e):
         if config_diver.angle == "1.0" or page.first == 1:
-            go_about()
-            time.sleep(8)
             page.first = 0
-            page.dialog.open = False
-            page.update()
         show_snack_bar(page, "开始校准，请切换回游戏（¬､¬）", ft.colors.GREEN)
         res = run(align_angle)
         if res == 1:
@@ -63,11 +59,7 @@ def choose_view(page: Page):
 
     def start(_e, name):
         if page.first == 1:
-            go_about()
-            time.sleep(8)
             page.first = 0
-            page.dialog.open = False
-            page.update()
         show_snack_bar(page, "开始运行，请切换回游戏（＾∀＾●）", ft.colors.GREEN)
         if name == "simul":
             page.su = run(
@@ -91,6 +83,10 @@ def choose_view(page: Page):
                 int(config_diver.max_run),
                 int(config_diver.speed_mode),
             )
+        if page.su is None:
+            show_snack_bar(page, "启动失败，请查看日志（⊙.⊙）", ft.colors.RED)
+            return
+
         run(page.su.start)
         txt = " "
         try:
@@ -125,7 +121,7 @@ def choose_view(page: Page):
         dlg = ft.AlertDialog(
             title=ft.Text("此程序为免费开源项目，如果你付了钱请立刻退款！"),
             content=ft.Text(
-                "咸鱼倒狗4000+！你付给倒狗的每一分钱都会让开源自动化更艰难，请退款并举报商家！本项目已经因倒卖行为受到严重威胁，请帮助我们！\n链接：https://github.com/CHNZYX/Auto_Simulated_Universe\n新群群号：545443061\n10秒后自动关闭"
+                "咸鱼倒狗4000+！你付给倒狗的每一分钱都会让开源自动化更艰难，请退款并举报商家！本项目已经因倒卖行为受到严重威胁，请帮助我们！\n链接：https://github.com/CHNZYX/Auto_Simulated_Universe\n新群群号：545443061"
             ),
         )
         page.dialog = dlg
@@ -140,6 +136,10 @@ def choose_view(page: Page):
             int(config_diver.max_run),
             int(config_diver.speed_mode),
         )
+        if page.su is None:
+            show_snack_bar(page, "截图测试初始化失败，请查看日志（⊙.⊙）", ft.colors.RED)
+            return
+
         run(page.su.screen_test)
         txt = " "
         if page.su is not None:

@@ -28,6 +28,16 @@ def click_box(ctx, box):
 def click_position(ctx, position):
     """点击像素坐标点。"""
     click_box(ctx, [position[0], position[0], position[1], position[1]])
+    # 全局默认：点击像素点后刷新一帧，避免后续逻辑继续使用旧截图。
+    # 可通过设置 ctx.auto_refresh_after_click_position = False 关闭。
+    time.sleep(0.5)
+    should_refresh = getattr(ctx, "auto_refresh_after_click_position", True)
+    if should_refresh and hasattr(ctx, "get_screen"):
+        try:
+            ctx.get_screen()
+        except Exception:
+            # 刷新失败不影响点击主流程。
+            pass
 
 
 def click(ctx, points, click_button=1):
@@ -91,6 +101,7 @@ def drag(ctx, pt1, pt2):
     pyautogui.drag(x2 - x1, y2 - y1, 0.4)
     time.sleep(0.3)
 
+
 def get_local(ctx, x, y, size, large=True):
     """在当前截图中截取指定中心点附近区域。"""
     sx, sy = size[0] + 60 * large, size[1] + 60 * large
@@ -100,4 +111,3 @@ def get_local(ctx, x, y, size, large=True):
         max(0, bx - sy // 2) : min(ctx.xx, bx + sy // 2),
         :,
     ]
-

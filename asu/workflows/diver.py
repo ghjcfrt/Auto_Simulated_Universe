@@ -229,29 +229,43 @@ class DivergentUniverse(UniverseUtils):
         self.click_position([125, 175 + int((self.diffi - 1) * (605 - 175) / 4)])
 
     def read_csv(self, file_path, name):
-        with open(file_path, mode="r", newline="", encoding="cp936") as file:
-            reader = csv.reader(file)
-            next(reader)
-            if name == "char":
-                data = defaultdict(dict)
-                for row in reader:
-                    data[row[0]].update(
-                        {
-                            white: int(row[3])
-                            for white in row[1].replace("，", ",").split(",")
+        last_error = None
+        for encoding in ("utf-8-sig", "utf-8", "cp936"):
+            try:
+                with open(file_path, mode="r", newline="", encoding=encoding) as file:
+                    reader = csv.reader(file)
+                    next(reader)
+                    if name == "char":
+                        data = defaultdict(dict)
+                        for row in reader:
+                            data[row[0]].update(
+                                {
+                                    white: int(row[3])
+                                    for white in row[1].replace("，", ",").split(",")
+                                }
+                            )
+                            data[row[0]].update(
+                                {
+                                    black: -int(row[3])
+                                    for black in row[2].replace("，", ",").split(",")
+                                }
+                            )
+                    else:
+                        data = {
+                            row[0]: [s.replace("，", ",") for s in row[1:]]
+                            for row in reader
                         }
-                    )
-                    data[row[0]].update(
-                        {
-                            black: -int(row[3])
-                            for black in row[2].replace("，", ",").split(",")
-                        }
-                    )
-            else:
-                data = {
-                    row[0]: [s.replace("，", ",") for s in row[1:]] for row in reader
-                }
-        return data
+                return data
+            except UnicodeDecodeError as exc:
+                last_error = exc
+
+        raise UnicodeDecodeError(
+            last_error.encoding if last_error else "unknown",
+            last_error.object if last_error else b"",
+            last_error.start if last_error else 0,
+            last_error.end if last_error else 0,
+            f"Failed to decode {file_path} with tried encodings: utf-8-sig, utf-8, cp936",
+        )
 
     def clean_text(self, text, char=1):
         symbols = r"[!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~—“”‘’«»„…·¿¡£¥€©®™°±÷×¶§‰]，。！？；：（）【】「」《》、￥ "
@@ -380,11 +394,14 @@ class DivergentUniverse(UniverseUtils):
                     "商店",
                     "首领",
                     "战斗",
+                    "遭遇",
                     "财富",
                     "休整",
                     "位面",
                 ],
             )
+            if res == "遭遇":
+                res = "战斗"
             if (res == "位面" or res is None) and deep == 0:
                 self.mouse_move(20)
                 scr = self.screen
@@ -456,37 +473,161 @@ class DivergentUniverse(UniverseUtils):
         return (portal["box"][0] + portal["box"][1]) // 2 - 950
 
     def in_battle(self):
-        return self.check("c", 0.988, 0.1528, threshold=0.825)
+        auto_btn = self.check("auto", 0.0818, 0.9565)
+        c_btn = self.check("c", 0.988, 0.1528, threshold=0.825)
+        if auto_btn:
+            self.press("v")
+
+        return auto_btn or c_btn
+
+    def _save_battle_ui_debug_images(
+        self,
+        roi,
+        roi_gray,
+        target_gray=None,
+        max_loc=None,
+        max_val=None,
+        reason="match",
+    ):
+        debug_dir = logs_path("battle_ui_debug")
+        os.makedirs(debug_dir, exist_ok=True)
+        if not hasattr(self, "_battle_ui_debug_idx"):
+            self._battle_ui_debug_idx = 0
+        self._battle_ui_debug_idx += 1
+
+        ts = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+        prefix = f"{ts}_{self._battle_ui_debug_idx:04d}_{reason}"
+
+        roi_path = os.path.join(debug_dir, f"{prefix}_roi.png")
+        cv.imwrite(roi_path, roi)
+
+        if roi_gray is not None:
+            gray_path = os.path.join(debug_dir, f"{prefix}_battle_ui_gray.png")
+            cv.imwrite(gray_path, roi_gray)
+
+            edge = cv.Canny(roi_gray, 50, 150)
+            edge_path = os.path.join(debug_dir, f"{prefix}_battle_ui_edge.png")
+            cv.imwrite(edge_path, edge)
+
+        if target_gray is not None:
+            target_path = os.path.join(debug_dir, f"{prefix}_template_gray.png")
+            cv.imwrite(target_path, target_gray)
+
+        if max_loc is not None and target_gray is not None:
+            vis = roi.copy()
+            th, tw = target_gray.shape[:2]
+            x, y = int(max_loc[0]), int(max_loc[1])
+            cv.rectangle(vis, (x, y), (x + tw, y + th), (0, 0, 255), 2)
+            if max_val is not None:
+                cv.putText(
+                    vis,
+                    f"score={max_val:.4f}",
+                    (max(0, x - 2), max(14, y - 6)),
+                    cv.FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    (0, 0, 255),
+                    1,
+                    cv.LINE_AA,
+                )
+            marked_path = os.path.join(debug_dir, f"{prefix}_max_region.png")
+            cv.imwrite(marked_path, vis)
+
+    def match_battle_roi(self, threshold=0.9):
+        # battle.png 默认位于 1920x1080 下的 [40,0]-[159,44]，按当前分辨率自适应。
+        if self.screen is None:
+            log.info("battle_ui检测: skipped(no screen)")
+            return False
+        x1, y1, x2, y2 = 40, 0, 159, 44
+        roi = self.screen[y1:y2, x1:x2]
+        if roi is None or roi.size == 0:
+            log.info("battle_ui检测: skipped(empty roi)")
+            return False
+
+        target = cv.imread(img_path("battle.png"))
+        if target is None:
+            log.error("模板读取失败: battle.png")
+            return False
+
+        roi_gray = cv.cvtColor(roi, cv.COLOR_BGR2GRAY)
+        target_gray = cv.cvtColor(target, cv.COLOR_BGR2GRAY)
+        if (
+            roi_gray.shape[0] < target_gray.shape[0]
+            or roi_gray.shape[1] < target_gray.shape[1]
+        ):
+            self._save_battle_ui_debug_images(
+                roi=roi,
+                roi_gray=roi_gray,
+                target_gray=target_gray,
+                reason="roi_too_small",
+            )
+            log.info(
+                f"battle_ui检测: skipped(roi too small) roi={roi_gray.shape[1]}x{roi_gray.shape[0]} tpl={target_gray.shape[1]}x{target_gray.shape[0]}"
+            )
+            return False
+
+        result = cv.matchTemplate(roi_gray, target_gray, cv.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv.minMaxLoc(result)
+
+        # 轻度兜底：主阈值未过时使用一个更宽松阈值，避免动画帧导致漏判。
+        relaxed_threshold = max(0.0, threshold - 0.08)
+        matched = max_val >= threshold or max_val >= relaxed_threshold
+        self._save_battle_ui_debug_images(
+            roi=roi,
+            roi_gray=roi_gray,
+            target_gray=target_gray,
+            max_loc=max_loc,
+            max_val=max_val,
+            reason="match" if matched else "no_match",
+        )
+        log.info(
+            f"battle_ui检测: score={max_val:.4f}, threshold={threshold:.2f}, relaxed={relaxed_threshold:.2f}, matched={int(matched)}"
+        )
+        return matched
 
     def wait_battle_end(self, timeout=120):
         tm = time.time()
+        seen_battle_ui = False
+        lost_frames = 0
         while time.time() - tm < timeout:
             self.get_screen()
             self.run_static()
-            if not self.in_battle():
-                time.sleep(0.5)
-                self.get_screen()
-                if not self.in_battle():
+            battle_ui = self.match_battle_roi(threshold=0.88)
+            if battle_ui:
+                seen_battle_ui = True
+                lost_frames = 0
+            elif seen_battle_ui:
+                # 仅在“已出现过 battle_ui”后，连续丢失判定战斗结束。
+                lost_frames += 1
+                if lost_frames >= 2:
+                    log.info("战斗结束检测: battle_ui 从可见变为不可见")
                     return 1
             time.sleep(0.2)
         return 0
 
-    # 战斗位面处理：触发战斗并等待结束
+    # 战斗、精英位面处理：触发战斗并等待结束
     def handle_battle_area(self, enter_timeout=18):
         tm = time.time()
+        entered_battle = False
         while time.time() - tm < enter_timeout:
             if self._stop:
                 return 0
             self.get_screen()
-            if self.in_battle():
+            battle_ui = self.match_battle_roi(threshold=0.9)
+            if battle_ui:
+                entered_battle = True
                 break
             self.press("w", 0.5)
             pyautogui.click()
             time.sleep(0.15)
-        self.get_screen()
-        if self.in_battle():
-            return self.wait_battle_end()
-        return 1
+
+        if not entered_battle:
+            self.get_screen()
+            entered_battle = self.match_battle_roi(threshold=0.88)
+        if not entered_battle:
+            log.warning("战斗位面：超时未进入战斗")
+            return 0
+
+        return self.wait_battle_end()
 
     # 新差分找门
     def _ensure_door_templates(self):
@@ -675,6 +816,12 @@ class DivergentUniverse(UniverseUtils):
         return 0
 
     def move_forward_to_door_f(self, timeout=20):
+        def is_portal_f_text(raw_text):
+            text = self.clean_text(str(raw_text or ""), char=0)
+            if not text:
+                return False
+            return "随意门" in text
+
         keyops.keyDown("w")
         tm = time.time()
         while time.time() - tm < timeout:
@@ -689,10 +836,14 @@ class DivergentUniverse(UniverseUtils):
                 keyops.keyDown("w")
                 continue
             if self.check_f(check_text=0):
-                keyops.keyUp("w")
-                self.press("f")
-                time.sleep(0.3)
-                return 1
+                f_text = self.ts.ocr_one_row(self.screen, [1206, 1437, 587, 635])
+                if is_portal_f_text(f_text):
+                    log.info(f"识别到门交互F文案：{f_text}")
+                    keyops.keyUp("w")
+                    self.press("f")
+                    time.sleep(0.3)
+                    return 1
+                log.info(f"跳过非门交互F文案：{f_text}")
             time.sleep(0.08)
         keyops.keyUp("w")
         return 0
@@ -760,7 +911,7 @@ class DivergentUniverse(UniverseUtils):
         keyops.keyUp("w")
         return 0
 
-    def handle_forge_area(self, timeout=10):
+    def handle_forge_area(self, timeout=12, event_timeout=12, mirror_events=False):
         tm = time.time()
         while time.time() - tm < timeout:
             if self._stop:
@@ -768,14 +919,50 @@ class DivergentUniverse(UniverseUtils):
             self.get_screen()
             if self.check_f(is_in=["造物调试台"]):
                 self.press("a", 1)
-                self.press("w", 1)
-                self.press("d", 1)
-                return 1
+                break
             keyops.keyDown("w")
             time.sleep(0.4)
             keyops.keyUp("w")
             time.sleep(0.1)
-        return 0
+        else:
+            return 0
+
+        def solve_one_forge_event(timeout_sec):
+            # 持续前进，直到识别到 F 事件交互。
+            keyops.keyDown("w")
+            try:
+                event_tm = time.time()
+                while time.time() - event_tm < timeout_sec:
+                    if self._stop:
+                        return 0
+                    self.get_screen()
+                    if self.check_f(is_in=["事件"]):
+                        keyops.keyUp("w")
+                        self.press("f")
+                        time.sleep(0.4)
+                        self.event()
+                        return 1
+                    time.sleep(0.08)
+            finally:
+                keyops.keyUp("w")
+            return 0
+
+        if not solve_one_forge_event(event_timeout):
+            return 0
+
+        # 奇遇中的铸造是左右对称双事件：左侧完成后切到右侧再处理一次。
+        if mirror_events:
+            self.press("d", 1)
+            time.sleep(0.25)
+            if not solve_one_forge_event(max(4, int(event_timeout * 0.8))):
+                # 兜底：若直行未触发，尝试按事件文本对齐再触发。
+                self.align_event("d", click=1)
+                time.sleep(0.4)
+                self.get_screen()
+                if "事件" in self.merge_text(self.ts.find_with_box([92, 195, 54, 88])):
+                    self.event()
+
+        return 1
 
     def recover_after_align_fail(self):
         # 对门失败时，执行双向小机动并短超时重试，避免单向偏移导致持续识别失败。
@@ -1257,6 +1444,7 @@ class DivergentUniverse(UniverseUtils):
 
     def area(self):
         area_now = self.get_now_area()
+        just_switched_role = False
         time.sleep(0.5)
         if self.get_now_area() != area_now or area_now is None:
             return 0
@@ -1276,6 +1464,8 @@ class DivergentUniverse(UniverseUtils):
         time.sleep(0.8)
 
         if self.area_state == 0:
+            speed_mode_enabled = bool(self.speed or getattr(config, "speed_mode", 0))
+
             # 判断队伍成员状态
             da_hei_ta_in_team = "大黑塔" in self.team_member
             bai_e_in_team = "白厄" in self.team_member
@@ -1286,45 +1476,43 @@ class DivergentUniverse(UniverseUtils):
             bai_e_has_skill = "白厄" in config.skill_char
             huang_quan_has_skill = "黄泉" in config.skill_char
 
-            # 优先级: 白厄 -> 大黑塔 -> 黄泉 -> 远程角色
-            if bai_e_in_team and bai_e_has_skill:
-                # 使用白厄
-                self.bai_e = 1
-
-            elif da_hei_ta_in_team and da_hei_ta_has_skill:
-                # 使用大黑塔
-                self.da_hei_ta = True
-
-            elif huang_quan_in_team and huang_quan_has_skill:
-                # 使用黄泉
-                self.quan = 1
-
-            else:
-                # 使用远程角色
-                self.da_hei_ta = False
-                self.bai_e = 0
-                self.quan = 0
+            # 非速通模式：不启用白厄/黄泉/大黑塔优先逻辑，默认远程站场。
+            self.da_hei_ta = False
+            self.bai_e = 0
+            self.quan = 0
+            if speed_mode_enabled and self.allow_e:
+                # 速通模式优先级: 白厄 -> 大黑塔 -> 黄泉
+                if bai_e_in_team and bai_e_has_skill:
+                    self.bai_e = 1
+                elif da_hei_ta_in_team and da_hei_ta_has_skill:
+                    self.da_hei_ta = True
+                elif huang_quan_in_team and huang_quan_has_skill:
+                    self.quan = 1
 
             # 决策站场角色
-            # 大黑塔:通用  黄泉:战斗
-
-            if self.allow_e:
-                # 存在大黑塔时,直接使用大黑塔作为站场角色
+            # 默认优先远程角色；仅速通模式时优先秘技角色。
+            selected_slot = None
+            if speed_mode_enabled and self.allow_e:
                 if self.da_hei_ta:
-                    self.press(str(self.team_member["大黑塔"] + 1))
+                    selected_slot = str(self.team_member["大黑塔"] + 1)
                 elif self.bai_e and area_now == "战斗":
-                    # 无大黑塔,那就切白厄
-                    self.press(str(self.team_member["白厄"] + 1))
+                    selected_slot = str(self.team_member["白厄"] + 1)
                 elif self.quan and area_now == "战斗":
-                    # 无大黑塔/白厄,那就切黄泉
-                    self.press(str(self.team_member["黄泉"] + 1))
-                else:
-                    # 切远程角色
-                    self.press(self.long_range)
+                    selected_slot = str(self.team_member["黄泉"] + 1)
 
-            else:
-                # 无秘技,切远程角色
-                self.press(self.long_range)
+            if (
+                selected_slot is None
+                and self.long_range
+                and str(self.long_range).isdigit()
+            ):
+                selected_slot = str(self.long_range)
+
+            if selected_slot is not None:
+                self.press(selected_slot)
+                just_switched_role = True
+                log.info(
+                    f"战斗站场选择: slot={selected_slot}, speed_mode={int(speed_mode_enabled)}"
+                )
 
         self.get_screen()
         if self.check("divergent/arrow", 0.7833, 0.9231, threshold=0.95):
@@ -1376,9 +1564,14 @@ class DivergentUniverse(UniverseUtils):
                 pyautogui.click()
                 self.check_pop()
                 time.sleep(0.4)
-                self.handle_forge_area()
+                if not self.handle_forge_area():
+                    return 0
                 self.area_state = 1
 
+            self.portal_opening_days(static=1)
+
+        elif area_now in ["商店"]:
+            self.press("w", 2)
             self.portal_opening_days(static=1)
 
         elif area_now in ["奖励"]:
@@ -1480,6 +1673,17 @@ class DivergentUniverse(UniverseUtils):
             else:
                 self.portal_opening_days(static=1)
 
+        elif area_now in ["奇遇"]:  # 奇遇-铸造
+            if self.area_state == 0:
+                pyautogui.click()
+                self.check_pop()  #
+                time.sleep(0.4)
+                if not self.handle_forge_area(mirror_events=True):
+                    return 0
+                self.area_state = 1
+
+            self.portal_opening_days(static=1)
+
         elif area_now == "休整":
             pyautogui.click()
             self.check_pop()
@@ -1491,17 +1695,18 @@ class DivergentUniverse(UniverseUtils):
             time.sleep(0.25)
             self.portal_opening_days(static=1)
 
-        elif area_now == "商店":
-            pyautogui.click()
-            self.check_pop()
-            time.sleep(0.3)
-            keyops.keyDown("w")
-            time.sleep(1.8)
-            keyops.keyUp("w")
-            time.sleep(0.6)
-            self.portal_opening_days(static=1)
+        # 旧版
+        # elif area_now == "商店":
+        #     pyautogui.click()
+        #     self.check_pop()
+        #     time.sleep(0.3)
+        #     keyops.keyDown("w")
+        #     time.sleep(1.8)
+        #     keyops.keyUp("w")
+        #     time.sleep(0.6)
+        #     self.portal_opening_days(static=1)
 
-        elif area_now == "首领":
+        elif area_now in ["首领"]:
             if self.floor == 13 and self.area_state > 0:
                 # 已经结束战斗了
                 self.close_and_exit()
@@ -1531,18 +1736,30 @@ class DivergentUniverse(UniverseUtils):
                 time.sleep(1)
                 self.portal_opening_days(static=1)
 
-        elif area_now == "战斗":
+        elif area_now in ["战斗", "精英"]:
             # 如果大黑塔秘技使能,先使用秘技,前面应该已经切换到了大黑塔
             if self.da_hei_ta and self.allow_e and not self.da_hei_ta_effecting:
                 self.skill()
                 self.da_hei_ta_effecting = True
 
             if self.area_state == 0:
-                if self.quan and self.allow_e:
+                if just_switched_role:
+                    # 给角色切换一个极短稳定窗口，避免紧接着冲刺导致切人丢失。
+                    time.sleep(0.22)
+                    self.get_screen()
+
+                on_quan = "黄泉" in self.team_member and self.long_range == str(
+                    self.team_member["黄泉"] + 1
+                )
+                on_bai_e = "白厄" in self.team_member and self.long_range == str(
+                    self.team_member["白厄"] + 1
+                )
+
+                if self.quan and self.allow_e and on_quan:
                     for _ in range(4):
                         self.skill(1)
                     time.sleep(1.5)
-                elif self.bai_e and self.allow_e:
+                elif self.bai_e and self.allow_e and on_bai_e:
                     for _ in range(4):
                         self.skill(1)
                     time.sleep(1.5)
@@ -1554,27 +1771,30 @@ class DivergentUniverse(UniverseUtils):
 
                 self.area_state = 1
 
-            if not ((self.quan or self.bai_e) and self.allow_e):
+            use_battle_skill_role = self.allow_e and (
+                (
+                    self.quan
+                    and "黄泉" in self.team_member
+                    and self.long_range == str(self.team_member["黄泉"] + 1)
+                )
+                or (
+                    self.bai_e
+                    and "白厄" in self.team_member
+                    and self.long_range == str(self.team_member["白厄"] + 1)
+                )
+            )
+            if not use_battle_skill_role:
                 self.press("w", 0.25)
             self.portal_opening_days(static=1)
 
-        elif area_now == "财富":
+        elif area_now in ["财富"]:
+            self.forward_until(text_list=["战利品", "药箱"], timeout=8, moving=0)
+            keyops.keyDown("a")
+            time.sleep(0.5)
+            keyops.keyUp("a")
             keyops.keyDown("w")
-            time.sleep(1.6)
-            self.press("a", 0.5)
+            time.sleep(1.3)
             keyops.keyUp("w")
-            pyautogui.click()
-            self.check_pop()
-            time.sleep(0.7)
-            res = self.forward_until(
-                text_list=["战利品", "药箱"], timeout=3.0, moving=0
-            )
-            if not res:
-                pyautogui.click()
-                self.check_pop()
-                time.sleep(0.7)
-                self.forward_until(text_list=["战利品", "药箱"], timeout=1.0, moving=0)
-            time.sleep(1.4)
             self.portal_opening_days(static=1)
 
         elif area_now == "位面":
@@ -1614,6 +1834,8 @@ class DivergentUniverse(UniverseUtils):
         if not self.click_img("new"):
             self.click((0.5, 0.5))
         time.sleep(0.2)
+        # 点击后强制刷新，避免在旧帧上继续执行后续确认。
+        self.get_screen()
         self.click_position([960, 975])
         time.sleep(1)
 
@@ -1685,8 +1907,19 @@ class DivergentUniverse(UniverseUtils):
         blesses = sorted(blesses, key=lambda x: x["score"], reverse=reverse)
         print(blesses)
         box = blesses[0]["box"]
-        if not (self.click_img("new") or self.click_img("divergent/suggested")):
+        # "new" 在不同亮度/动画帧下会出现轻微抖动，先多次尝试再回退。
+        clicked_new = False
+        for threshold in (0.95, 0.93, 0.91):
+            if self.click_img("new", threshold=threshold):
+                clicked_new = True
+                break
+            self.get_screen()
+        if not clicked_new and not self.click_img(
+            "divergent/suggested", threshold=0.93
+        ):
             self.click_position([(box[0] + box[1]) // 2, 500])
+        # 选卡后强制刷新，保证确认按钮点击时机基于最新界面。
+        self.get_screen()
         if blood:
             self.click_position([960, 975])
         else:
@@ -1791,6 +2024,10 @@ class DivergentUniverse(UniverseUtils):
             if not self._stop:
                 self.stop()
         except Exception as e:
+            # 运行中触发 stop() 后，底层按键函数会抛出 "正在退出"，属于正常退出流程。
+            if self._stop and isinstance(e, ValueError) and str(e) == "正在退出":
+                log.info("停止运行完成")
+                return
             print_exc()
             traceback.print_exc()
             log.info(str(e))

@@ -6,23 +6,44 @@ import pyautogui
 import win32api
 
 
+def _window_origin(ctx) -> tuple[int, int]:
+    x0 = getattr(ctx, "x0", None)
+    y0 = getattr(ctx, "y0", None)
+    if x0 is None:
+        x0 = getattr(ctx, "x1", 0) - ctx.xx
+    if y0 is None:
+        y0 = getattr(ctx, "y1", 0) - ctx.yy
+    return int(x0), int(y0)
+
+
+def _norm_to_local_pixel(ctx, x: float, y: float) -> tuple[int, int]:
+    return int(x * ctx.xx), int(y * ctx.yy)
+
+
+def _local_pixel_to_norm(ctx, px: int, py: int) -> tuple[float, float]:
+    return px / ctx.xx, py / ctx.yy
+
+
 def get_point(ctx, x, y, printer=print):
     """输出一个像素点在当前窗口中的归一化坐标。"""
-    x = ctx.x1 - x
-    y = ctx.y1 - y
-    printer("获取到点：{:.4f},{:.4f}".format(x / ctx.xx, y / ctx.yy))
+    # 输入像素是屏幕绝对坐标，先转换到窗口局部坐标再归一化。
+    x0, y0 = _window_origin(ctx)
+    px = int(x - x0)
+    py = int(y - y0)
+    nx, ny = _local_pixel_to_norm(ctx, px, py)
+    printer("获取到点：{:.4f},{:.4f}".format(nx, ny))
 
 
 def calc_point(ctx, point, offset):
     """按窗口尺寸把偏移量从像素转换为归一化坐标。"""
-    return (point[0] - offset[0] / ctx.xx, point[1] - offset[1] / ctx.yy)
+    return (point[0] + offset[0] / ctx.xx, point[1] + offset[1] / ctx.yy)
 
 
 def click_box(ctx, box):
     """点击文字识别框中心点。"""
     x = (box[0] + box[1]) / 2
     y = (box[2] + box[3]) / 2
-    click(ctx, (1 - x / ctx.xx, 1 - y / ctx.yy))
+    click(ctx, (x / ctx.xx, y / ctx.yy))
 
 
 def click_position(ctx, position):
@@ -46,8 +67,10 @@ def click(ctx, points, click_button=1):
         print(points)
     ctx.print_stack()
     x, y = points
-    if type(x) != int:
-        x, y = ctx.x1 - int(x * ctx.xx), ctx.y1 - int(y * ctx.yy)
+    if not isinstance(x, (int, np.integer)):
+        lx, ly = _norm_to_local_pixel(ctx, x, y)
+        x0, y0 = _window_origin(ctx)
+        x, y = x0 + lx, y0 + ly
     if ctx.full:
         x += 9
         y += 9
@@ -87,10 +110,13 @@ def calculated(result, shape):
 
 def drag(ctx, pt1, pt2):
     """按归一化坐标拖动鼠标。"""
+    x0, y0 = _window_origin(ctx)
     x1, y1 = pt1
-    x1, y1 = ctx.x1 - int(x1 * ctx.xx), ctx.y1 - int(y1 * ctx.yy)
+    lx1, ly1 = _norm_to_local_pixel(ctx, x1, y1)
+    x1, y1 = x0 + lx1, y0 + ly1
     x2, y2 = pt2
-    x2, y2 = ctx.x1 - int(x2 * ctx.xx), ctx.y1 - int(y2 * ctx.yy)
+    lx2, ly2 = _norm_to_local_pixel(ctx, x2, y2)
+    x2, y2 = x0 + lx2, y0 + ly2
     if ctx.full:
         x1 += 9
         y1 += 9
@@ -105,7 +131,7 @@ def drag(ctx, pt1, pt2):
 def get_local(ctx, x, y, size, large=True):
     """在当前截图中截取指定中心点附近区域。"""
     sx, sy = size[0] + 60 * large, size[1] + 60 * large
-    bx, by = ctx.xx - int(x * ctx.xx), ctx.yy - int(y * ctx.yy)
+    bx, by = _norm_to_local_pixel(ctx, x, y)
     return ctx.screen[
         max(0, by - sx // 2) : min(ctx.yy, by + sx // 2),
         max(0, bx - sy // 2) : min(ctx.xx, bx + sy // 2),

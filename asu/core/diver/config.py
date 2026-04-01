@@ -58,6 +58,7 @@ class Config:
         self.mapping = list(self.origin_key)
         self.max_run = 34
         self.match = self._load_json(self._project_path("actions", "character.json"))
+        self._match_reverse = self._build_match_reverse(self.match)
         self.read()
 
     def _project_path(self, *parts: str) -> str:
@@ -95,6 +96,15 @@ class Config:
             return {}
         return data if isinstance(data, dict) else {}
 
+    @staticmethod
+    def _build_match_reverse(match_map: dict[str, Any]) -> dict[str, str]:
+        reverse: dict[str, str] = {}
+        for _, value in match_map.items():
+            canonical = str(value)
+            if canonical and canonical not in reverse:
+                reverse[canonical] = canonical
+        return reverse
+
     @property
     def multi(self) -> float:
         angle_value = self._safe_float(self.angle, 1.0)
@@ -117,12 +127,27 @@ class Config:
         translator = str.maketrans("", "", symbols)
         return text.translate(translator)
 
+    def normalize_character_name(self, name: Any) -> str:
+        cleaned_name = self.clean_text(str(name), 0)
+        if not cleaned_name:
+            return ""
+
+        # 优先使用别名映射（alias -> canonical）。
+        mapped = self.match.get(cleaned_name)
+        if mapped is not None:
+            return str(mapped)
+
+        # 再走反向兜底（canonical -> canonical），避免“已是标准名”被误判。
+        reverse = self._match_reverse.get(cleaned_name)
+        if reverse is not None:
+            return reverse
+
+        return cleaned_name
+
     def update_skill(self, skill: list[str]):
         self.skill_char = []
         for char_name in skill:
-            cleaned_name = self.clean_text(str(char_name), 0)
-            if cleaned_name in self.match:
-                cleaned_name = str(self.match[cleaned_name])
+            cleaned_name = self.normalize_character_name(char_name)
             if cleaned_name in self.all_list or cleaned_name in ["1", "2", "3", "4"]:
                 self.skill_char.append(cleaned_name)
         print(f"秘技列表:{self.skill_char}")

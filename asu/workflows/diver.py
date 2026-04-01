@@ -75,6 +75,17 @@ class DivergentUniverse(UniverseUtils):
         self.event_text = ""
 
         self.long_range = "1"  # 默认角色 选用1号位
+        self.long_range_from_team = False  # 仅在识别到队伍站位后才允许按远程位切人
+        self._auto_battle_last_state = None
+        self._auto_battle_last_toggle = 0.0
+        self._auto_battle_c_miss_count = 0
+        self._auto_battle_wait_post_v = False
+        self._auto_battle_stop_recognize = False
+        self._auto_battle_probe_start = 0.0
+        self._auto_battle_probe_seen_any = False
+        self._battle_ui_detection_enabled = True
+        self._entered_universe_scene = False
+        self._team_ocr_debug_idx = 0
 
         self.init_floor()
         self.saved_num = 0
@@ -116,6 +127,57 @@ class DivergentUniverse(UniverseUtils):
             self.loop()
         log.info("停止运行")
 
+    def route_door_test(self):
+        self.threshold = 0.97
+        self.is_get_team = True
+        while True:
+            if self._stop:
+                break
+
+            hwnd = win32gui.GetForegroundWindow()
+            text = win32gui.GetWindowText(hwnd)
+            warn_game = False
+            while text != "崩坏：星穹铁道" and text != "云·星穹铁道" and not self._stop:
+                if not warn_game:
+                    warn_game = True
+                    log.warning(f"对门测试等待游戏窗口，当前窗口：{text}")
+                time.sleep(0.5)
+                hwnd = win32gui.GetForegroundWindow()
+                text = win32gui.GetWindowText(hwnd)
+
+            if self._stop:
+                break
+
+            self.get_screen()
+            self.ts.forward(self.screen)
+            area_text = self.clean_text(
+                self.ts.ocr_one_row(self.screen, [50, 350, 3, 35]), char=0
+            )
+            if not (
+                "位面" in area_text or "区域" in area_text or "第" in area_text
+            ):
+                time.sleep(0.3)
+                continue
+
+            self._entered_universe_scene = True
+            aligned = self.align_to_door(timeout=6)
+            if not aligned:
+                aligned = self.recover_after_align_fail()
+
+            if not aligned:
+                log.warning("对门测试: 对门失败")
+                time.sleep(0.5)
+                continue
+
+            if self.move_forward_to_door_f(timeout=20):
+                log.info("对门测试: 成功触发F交互")
+            else:
+                log.warning("对门测试: 未触发F交互")
+
+            time.sleep(0.4)
+
+        log.info("对门测试已停止")
+
     def loop(self):
         self.ts.forward(self.get_screen())
         res = self.run_static()
@@ -124,10 +186,11 @@ class DivergentUniverse(UniverseUtils):
                 self.ts.ocr_one_row(self.screen, [50, 350, 3, 35]), char=0
             )
             if "位面" in area_text or "区域" in area_text or "第" in area_text:
+                self._entered_universe_scene = True
                 self.area()
                 self.last_action_time = time.time()
 
-            elif self.check("c", 0.988, 0.1528, threshold=0.825):
+            elif self._entered_universe_scene and self._check_battle_c_btn():
                 # 未检查到自动战斗,已经入站,清除秘技持续
                 self.da_hei_ta_effecting = False
                 self.press("v")
@@ -222,6 +285,22 @@ class DivergentUniverse(UniverseUtils):
                     self.action_history.append(i["name"])
                     self.action_history = self.action_history[-10:]
                     return i["name"]
+        return ""
+
+    def _match_default_trigger_name(self, action_names=None) -> str:
+        # 仅检测 default.json 的触发条件，不执行动作。
+        if action_names is None:
+            action_names = self.default_json.keys()
+        for action_name in action_names:
+            if action_name not in self.default_json:
+                continue
+            for item in self.default_json[action_name]:
+                trigger = item["trigger"]
+                text = self.ts.find_with_box(
+                    trigger["box"], redundancy=trigger.get("redundancy", 30)
+                )
+                if len(text) and trigger["text"] in self.merge_text(text):
+                    return item["name"]
         return ""
 
     def select_difficulty(self):
@@ -342,24 +421,113 @@ class DivergentUniverse(UniverseUtils):
     def test(self):
         self.find_team_member()
 
-    def find_team_member(self):
+    def _save_team_slot_ocr_image(self, screen, box, slot, raw_name, clean_name):
+        if screen is None or getattr(screen, "size", 0) == 0:
+            return
+        h, w = screen.shape[:2]
+        x1, x2, y1, y2 = box
+        x1 = max(0, min(w, int(x1)))
+        x2 = max(0, min(w, int(x2)))
+        y1 = max(0, min(h, int(y1)))
+        y2 = max(0, min(h, int(y2)))
+        if x1 >= x2 or y1 >= y2:
+            return
+
+        crop = screen[y1:y2, x1:x2]
+        if crop.size == 0:
+            return
+
+        self._team_ocr_debug_idx += 1
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        save_dir = logs_path("team_ocr")
+        os.makedirs(save_dir, exist_ok=True)
+        base_name = f"{ts}_{self._team_ocr_debug_idx:04d}_slot{slot}"
+        save_path = os.path.join(
+            save_dir,
+            f"{base_name}.png",
+        )
+        cv.imwrite(save_path, crop)
+        meta_path = os.path.join(save_dir, f"{base_name}.txt")
+        with open(meta_path, "w", encoding="utf-8") as f:
+            f.write(f"slot={slot}\n")
+            f.write(f"raw={raw_name}\n")
+            f.write(f"clean={clean_name}\n")
+
+    def _check_battle_c_btn(self):
+        # 固定 ROI：左上(0,900) 右下(127,950)，按当前分辨率等比换算。
+        if self.screen is None or self.screen.size == 0:
+            return False
+
+        x1 = int(self.xx * 0 / 1920)
+        x2 = int(self.xx * 127 / 1920)
+        y1 = int(self.yy * 900 / 1080)
+        y2 = int(self.yy * 950 / 1080)
+        roi = self.screen[y1:y2, x1:x2]
+        if roi is None or roi.size == 0:
+            return False
+
+        path = self.format_path("c")
+        target = cv.imread(path)
+        if target is None:
+            log.error(f"模板读取失败: {path}")
+            return False
+
+        target_w = max(1, int(round(self.scx * target.shape[1])))
+        target_h = max(1, int(round(self.scx * target.shape[0])))
+        target = cv.resize(target, dsize=(target_w, target_h))
+        if roi.shape[0] < target.shape[0] or roi.shape[1] < target.shape[1]:
+            log.info(
+                f"c按钮ROI检测: skipped(roi too small) roi={roi.shape[1]}x{roi.shape[0]} tpl={target.shape[1]}x{target.shape[0]}"
+            )
+            return False
+
+        threshold = 0.80
+        result = cv.matchTemplate(roi, target, cv.TM_CCORR_NORMED)
+        _, max_val, _, max_loc = cv.minMaxLoc(result)
+
+        self.tm = max_val
+        self.tx = (x1 + max_loc[0] + 0.5 * target.shape[1]) / self.xx
+        self.ty = (y1 + max_loc[1] + 0.5 * target.shape[0]) / self.yy
+        matched = max_val >= threshold
+        log.info(
+            f"c按钮ROI检测: score={max_val:.4f}, threshold={threshold:.2f}, matched={int(matched)}"
+        )
+        return matched
+
+    def find_team_member(self, return_details=False):
         boxes = [
-            [1620, 1790, 289, 335],
-            [1620, 1790, 384, 427],
-            [1620, 1790, 478, 521],
-            [1620, 1790, 570, 618],
-        ]
+            [1620, 1777, 289, 335],
+            [1620, 1777, 384, 427],
+            [1620, 1777, 478, 521],
+            [1620, 1777, 570, 618],
+        ]  # x1, x2, y1, y2
         team_member = {}
+        detect_details = []
         for i, b in enumerate(boxes):
-            name = self.clean_text(self.ts.ocr_one_row(self.get_screen(), b))
+            screen = self.get_screen()
+            raw_name = (self.ts.ocr_one_row(screen, b) or "").strip()
+            name = config.normalize_character_name(raw_name)
+            self._save_team_slot_ocr_image(screen, b, i + 1, raw_name, name)
             if name in self.character_prior:
                 team_member[name] = i
+            if return_details:
+                detect_details.append(
+                    {
+                        "slot": i + 1,
+                        "raw": raw_name,
+                        "clean": name,
+                        "matched": name in self.character_prior,
+                        "long_range": name in config.long_range_list,
+                    }
+                )
+        if return_details:
+            return team_member, detect_details
         return team_member
 
     def get_now_area(self, deep=0):
-        team_member = self.find_team_member()
+        team_member, team_detect_detail = self.find_team_member(return_details=True)
         self.area_text = self.clean_text(
-            self.ts.ocr_one_row(self.screen, [50, 350, 3, 35]), char=0
+            self.ts.ocr_one_row(self.screen, [54, 311, 16, 42]), char=0
         )
         print("area_text:", self.area_text, "deep:", deep)
         if (
@@ -367,6 +535,10 @@ class DivergentUniverse(UniverseUtils):
             or "区域" in self.area_text
             or "第" in self.area_text
         ):
+            if not self._battle_ui_detection_enabled:
+                self._battle_ui_detection_enabled = True
+                log.info("battle_ui检测: 已识别到位面/区域文本，恢复检测")
+
             check_ok = 1
             for i in team_member:
                 if i not in self.team_member or team_member[i] != self.team_member[i]:
@@ -376,13 +548,30 @@ class DivergentUniverse(UniverseUtils):
             if not check_ok:
                 self.team_member = team_member
                 print("team_member:", team_member)
+                self.team_detect = team_detect_detail
+                log.info(
+                    "队伍识别明细: "
+                    + " | ".join(
+                        [
+                            f"{i['slot']}号位 raw='{i['raw']}' clean='{i['clean']}' matched={int(i['matched'])} long_range={int(i['long_range'])}"
+                            for i in team_detect_detail
+                        ]
+                    )
+                )
+                self.long_range_from_team = False
                 for i in self.team_member:
                     # 从当前队伍中,选取处于内置远程角色列表中的第一个远程角色
                     if i in config.long_range_list:
                         self.long_range = str(
                             self.team_member[i] + 1
                         )  # 更新默认远程角色
+                        self.long_range_from_team = True
+                        log.info(f"队伍识别远程角色: 命中{i}, 站位={self.long_range}")
                         break
+                if not self.long_range_from_team:
+                    log.info(
+                        f"队伍识别远程角色: 未命中, long_range_list={config.long_range_list}, 当前队伍={list(self.team_member.keys())}"
+                    )
 
             res = self.get_text_type(
                 self.area_text,
@@ -472,80 +661,89 @@ class DivergentUniverse(UniverseUtils):
     def portal_bias(self, portal):
         return (portal["box"][0] + portal["box"][1]) // 2 - 950
 
-    def in_battle(self):
-        auto_btn = self.check("auto", 0.0818, 0.9565)
-        c_btn = self.check("c", 0.988, 0.1528, threshold=0.825)
-        if auto_btn:
+    def _reset_auto_battle_runtime_state(self):
+        self._auto_battle_last_state = None
+        self._auto_battle_last_toggle = 0.0
+        self._auto_battle_c_miss_count = 0
+        self._auto_battle_wait_post_v = False
+        self._auto_battle_stop_recognize = False
+        self._auto_battle_probe_start = 0.0
+        self._auto_battle_probe_seen_any = False
+
+    def auto_battle(self):
+        if self._auto_battle_stop_recognize:
+            return False
+
+        now = time.time()
+        if self._auto_battle_probe_start <= 0:
+            self._auto_battle_probe_start = now
+
+        auto_btn = self.check(
+            "auto",
+            1763 / 1920,
+            47 / 1080,
+            debug_save=False,
+            debug_tag="auto_btn",
+            threshold=0.9,
+        )
+        c_btn = self._check_battle_c_btn()
+
+        if auto_btn or c_btn:
+            self._auto_battle_probe_seen_any = True
+        elif (
+            not self._auto_battle_probe_seen_any
+        ) and now - self._auto_battle_probe_start >= 2.0:
+            self._auto_battle_stop_recognize = True
+            log.info("自动战斗检测: 入战后2s内未命中auto/c，停止后续识别并视为已开启")
+            return False
+
+        if auto_btn and not c_btn:
+            self._auto_battle_c_miss_count += 1
+            if (
+                self._auto_battle_c_miss_count in (1, 5)
+                or self._auto_battle_c_miss_count % 20 == 0
+            ):
+                log.info(
+                    f"自动战斗检测: auto=1 但 c 未命中，连续丢失{self._auto_battle_c_miss_count}帧"
+                )
+        else:
+            self._auto_battle_c_miss_count = 0
+
+        state = (int(auto_btn), int(c_btn))
+        if state != self._auto_battle_last_state:
+            log.info(f"自动战斗检测: auto={state[0]}, c={state[1]}")
+            self._auto_battle_last_state = state
+
+        if self._auto_battle_wait_post_v and (not auto_btn) and (not c_btn):
+            self._auto_battle_wait_post_v = False
+            self._auto_battle_stop_recognize = True
+            log.info("自动战斗检测: v后 auto/c 同时未命中，停止后续识别")
+            return False
+
+        # c 与 auto 同时命中时，等待后发送一次 v。
+        if c_btn and auto_btn and time.time() - self._auto_battle_last_toggle > 1.2:
+            self._auto_battle_last_toggle = time.time()
+            time.sleep(0.5)
             self.press("v")
+            self._auto_battle_wait_post_v = True
+            log.info("自动战斗检测: c+auto命中，等待0.5s后发送v")
 
         return auto_btn or c_btn
 
-    def _save_battle_ui_debug_images(
-        self,
-        roi,
-        roi_gray,
-        target_gray=None,
-        max_loc=None,
-        max_val=None,
-        reason="match",
-    ):
-        debug_dir = logs_path("battle_ui_debug")
-        os.makedirs(debug_dir, exist_ok=True)
-        if not hasattr(self, "_battle_ui_debug_idx"):
-            self._battle_ui_debug_idx = 0
-        self._battle_ui_debug_idx += 1
-
-        ts = time.strftime("%Y%m%d_%H%M%S", time.localtime())
-        prefix = f"{ts}_{self._battle_ui_debug_idx:04d}_{reason}"
-
-        roi_path = os.path.join(debug_dir, f"{prefix}_roi.png")
-        cv.imwrite(roi_path, roi)
-
-        if roi_gray is not None:
-            gray_path = os.path.join(debug_dir, f"{prefix}_battle_ui_gray.png")
-            cv.imwrite(gray_path, roi_gray)
-
-            edge = cv.Canny(roi_gray, 50, 150)
-            edge_path = os.path.join(debug_dir, f"{prefix}_battle_ui_edge.png")
-            cv.imwrite(edge_path, edge)
-
-        if target_gray is not None:
-            target_path = os.path.join(debug_dir, f"{prefix}_template_gray.png")
-            cv.imwrite(target_path, target_gray)
-
-        if max_loc is not None and target_gray is not None:
-            vis = roi.copy()
-            th, tw = target_gray.shape[:2]
-            x, y = int(max_loc[0]), int(max_loc[1])
-            cv.rectangle(vis, (x, y), (x + tw, y + th), (0, 0, 255), 2)
-            if max_val is not None:
-                cv.putText(
-                    vis,
-                    f"score={max_val:.4f}",
-                    (max(0, x - 2), max(14, y - 6)),
-                    cv.FONT_HERSHEY_SIMPLEX,
-                    0.45,
-                    (0, 0, 255),
-                    1,
-                    cv.LINE_AA,
-                )
-            marked_path = os.path.join(debug_dir, f"{prefix}_max_region.png")
-            cv.imwrite(marked_path, vis)
-
     def match_battle_roi(self, threshold=0.9):
-        # battle.png 默认位于 1920x1080 下的 [40,0]-[159,44]，按当前分辨率自适应。
+        # battle_ui 改为全屏模板匹配，不再裁固定 ROI。
+        # 语义约定：matched=True 表示“未入战常驻 battle_ui 可见”。
         if self.screen is None:
             log.info("battle_ui检测: skipped(no screen)")
             return False
-        x1, y1, x2, y2 = 40, 0, 159, 44
-        roi = self.screen[y1:y2, x1:x2]
+        roi = self.screen
         if roi is None or roi.size == 0:
             log.info("battle_ui检测: skipped(empty roi)")
             return False
 
-        target = cv.imread(img_path("battle.png"))
+        target = cv.imread(img_path("divergent", "battle.png"))
         if target is None:
-            log.error("模板读取失败: battle.png")
+            log.error("模板读取失败: divergent/battle.png")
             return False
 
         roi_gray = cv.cvtColor(roi, cv.COLOR_BGR2GRAY)
@@ -554,12 +752,6 @@ class DivergentUniverse(UniverseUtils):
             roi_gray.shape[0] < target_gray.shape[0]
             or roi_gray.shape[1] < target_gray.shape[1]
         ):
-            self._save_battle_ui_debug_images(
-                roi=roi,
-                roi_gray=roi_gray,
-                target_gray=target_gray,
-                reason="roi_too_small",
-            )
             log.info(
                 f"battle_ui检测: skipped(roi too small) roi={roi_gray.shape[1]}x{roi_gray.shape[0]} tpl={target_gray.shape[1]}x{target_gray.shape[0]}"
             )
@@ -571,36 +763,80 @@ class DivergentUniverse(UniverseUtils):
         # 轻度兜底：主阈值未过时使用一个更宽松阈值，避免动画帧导致漏判。
         relaxed_threshold = max(0.0, threshold - 0.08)
         matched = max_val >= threshold or max_val >= relaxed_threshold
-        self._save_battle_ui_debug_images(
-            roi=roi,
-            roi_gray=roi_gray,
-            target_gray=target_gray,
-            max_loc=max_loc,
-            max_val=max_val,
-            reason="match" if matched else "no_match",
-        )
         log.info(
             f"battle_ui检测: score={max_val:.4f}, threshold={threshold:.2f}, relaxed={relaxed_threshold:.2f}, matched={int(matched)}"
         )
         return matched
 
-    def wait_battle_end(self, timeout=120):
+    def battle_end(self):
+        battle_exit_actions = ["祝福选择", "战斗结束-失败"]
+        # 结束判定直接执行 default.json 对应动作，避免“只识别不执行”。
+        exit_action = self.run_static(action_list=battle_exit_actions)
+        if exit_action:
+            log.info(f"战斗结束检测: 命中并执行退出动作 {exit_action}")
+            return exit_action
+
+        return ""
+
+    def _resolve_post_battle_settlement(self, timeout=35):
         tm = time.time()
-        seen_battle_ui = False
-        lost_frames = 0
+        settle_actions = [
+            "祝福选择",
+            "确认界面",
+            "点击空白处关闭",
+            "继续战斗",
+            "过量转化",
+            "战斗结束-失败",
+        ]
         while time.time() - tm < timeout:
+            if self._stop:
+                return 0
             self.get_screen()
-            self.run_static()
-            battle_ui = self.match_battle_roi(threshold=0.88)
-            if battle_ui:
-                seen_battle_ui = True
-                lost_frames = 0
-            elif seen_battle_ui:
-                # 仅在“已出现过 battle_ui”后，连续丢失判定战斗结束。
-                lost_frames += 1
-                if lost_frames >= 2:
-                    log.info("战斗结束检测: battle_ui 从可见变为不可见")
-                    return 1
+            self.ts.forward(self.screen)
+
+            area_text = self.clean_text(
+                self.ts.ocr_one_row(self.screen, [50, 350, 3, 35]), char=0
+            )
+            if "位面" in area_text or "区域" in area_text or "第" in area_text:
+                self._entered_universe_scene = True
+                return 1
+
+            settled = self.run_static(action_list=settle_actions)
+            if settled == "战斗结束-失败":
+                log.warning("战斗结算检测: 命中失败流程，返回上层处理")
+                return 0
+            time.sleep(0.2)
+
+        log.warning("战斗结算检测: 超时未回到位面界面")
+        return 0
+
+    def wait_battle_end(self, timeout=120, confirmed_in_battle=False):
+        if not confirmed_in_battle:
+            log.warning("wait_battle_end 跳过：未确认已入战")
+            return 0
+        if self._battle_ui_detection_enabled:
+            self._battle_ui_detection_enabled = False
+            log.info("battle_ui检测: 已确认入战，暂停检测")
+        tm = time.time()
+        battle_wait_actions = ["继续战斗", "确认界面", "点击空白处关闭", "过量转化"]
+        while time.time() - tm < timeout:
+            if self._stop:
+                log.info("wait_battle_end: 收到停止信号，退出战斗等待")
+                return 0
+            self.get_screen()
+            self.ts.forward(self.screen)
+            if self._stop:
+                log.info("wait_battle_end: 截图后收到停止信号，退出战斗等待")
+                return 0
+            # auto_battle 仅负责确保自动战斗开启。
+            self.auto_battle()
+            # 战斗等待期间仅执行白名单动作，避免把退出目标页面提前消费掉。
+            self.run_static(action_list=battle_wait_actions)
+            ended_action = self.battle_end()
+            if ended_action == "战斗结束-失败":
+                return 0
+            if ended_action:
+                return 1
             time.sleep(0.2)
         return 0
 
@@ -608,26 +844,60 @@ class DivergentUniverse(UniverseUtils):
     def handle_battle_area(self, enter_timeout=18):
         tm = time.time()
         entered_battle = False
+        battle_ui_missing_since = None
+        battle_ui_missing_confirm_seconds = 3.0
         while time.time() - tm < enter_timeout:
             if self._stop:
                 return 0
             self.get_screen()
-            battle_ui = self.match_battle_roi(threshold=0.9)
-            if battle_ui:
-                entered_battle = True
-                break
-            self.press("w", 0.5)
+            battle_ui_visible = self.match_battle_roi(threshold=0.9)
+            # 语义翻转：battle_ui 可见=未入战，battle_ui 不可见=已入战/战中。
+            if not battle_ui_visible:
+                if battle_ui_missing_since is None:
+                    battle_ui_missing_since = time.time()
+                missing_seconds = time.time() - battle_ui_missing_since
+                if missing_seconds >= battle_ui_missing_confirm_seconds:
+                    log.info(
+                        f"战斗进入检测: battle_ui 连续丢失{missing_seconds:.2f}s，判定已进入战斗"
+                    )
+                    entered_battle = True
+                    break
+            else:
+                battle_ui_missing_since = None
+            # 未确认入战前持续 w+左键触发。
+            self.press("w", 0.45)
             pyautogui.click()
             time.sleep(0.15)
 
         if not entered_battle:
-            self.get_screen()
-            entered_battle = self.match_battle_roi(threshold=0.88)
+            for _ in range(6):
+                self.get_screen()
+                battle_ui_visible = self.match_battle_roi(threshold=0.88)
+                if not battle_ui_visible:
+                    if battle_ui_missing_since is None:
+                        battle_ui_missing_since = time.time()
+                    missing_seconds = time.time() - battle_ui_missing_since
+                    if missing_seconds >= battle_ui_missing_confirm_seconds:
+                        log.info(
+                            f"战斗进入检测: 二次确认 battle_ui 连续丢失{missing_seconds:.2f}s"
+                        )
+                        entered_battle = True
+                        break
+                else:
+                    battle_ui_missing_since = None
+                self.press("w", 0.2)
+                pyautogui.click()
+                time.sleep(0.12)
         if not entered_battle:
             log.warning("战斗位面：超时未进入战斗")
             return 0
 
-        return self.wait_battle_end()
+        # 入战已确认后，再执行自动战斗确认/开启动作。
+        self._reset_auto_battle_runtime_state()
+        self.auto_battle()
+        if not self.wait_battle_end(confirmed_in_battle=True):
+            return 0
+        return self._resolve_post_battle_settlement()
 
     # 新差分找门
     def _ensure_door_templates(self):
@@ -824,17 +1094,33 @@ class DivergentUniverse(UniverseUtils):
 
         keyops.keyDown("w")
         tm = time.time()
+        battle_ui_missing_since = None
+        battle_ui_missing_confirm_seconds = 3.0
         while time.time() - tm < timeout:
             if self._stop:
                 keyops.keyUp("w")
                 return 0
             self.get_screen()
-            if self.in_battle():
-                keyops.keyUp("w")
-                if not self.wait_battle_end():
-                    return 0
-                keyops.keyDown("w")
-                continue
+            # 入战判定仅依赖 battle_ui；入战后才调用 auto_battle。
+            battle_ui_visible = self.match_battle_roi(threshold=0.88)
+            if not battle_ui_visible:
+                if battle_ui_missing_since is None:
+                    battle_ui_missing_since = time.time()
+                missing_seconds = time.time() - battle_ui_missing_since
+                if missing_seconds >= battle_ui_missing_confirm_seconds:
+                    log.info(f"门前入战检测: battle_ui 连续丢失{missing_seconds:.2f}s")
+                    keyops.keyUp("w")
+                    self._reset_auto_battle_runtime_state()
+                    self.auto_battle()
+                    if not self.wait_battle_end(confirmed_in_battle=True):
+                        return 0
+                    if not self._resolve_post_battle_settlement():
+                        return 0
+                    keyops.keyDown("w")
+                    battle_ui_missing_since = None
+                    continue
+            else:
+                battle_ui_missing_since = None
             if self.check_f(check_text=0):
                 f_text = self.ts.ocr_one_row(self.screen, [1206, 1437, 587, 635])
                 if is_portal_f_text(f_text):
@@ -1502,6 +1788,7 @@ class DivergentUniverse(UniverseUtils):
 
             if (
                 selected_slot is None
+                and self.long_range_from_team
                 and self.long_range
                 and str(self.long_range).isdigit()
             ):
@@ -1513,6 +1800,8 @@ class DivergentUniverse(UniverseUtils):
                 log.info(
                     f"战斗站场选择: slot={selected_slot}, speed_mode={int(speed_mode_enabled)}"
                 )
+            else:
+                log.info("战斗站场选择: 跳过切换(未识别到远程角色站位)")
 
         self.get_screen()
         if self.check("divergent/arrow", 0.7833, 0.9231, threshold=0.95):
@@ -1731,6 +2020,10 @@ class DivergentUniverse(UniverseUtils):
                 pyautogui.click()
                 time.sleep(0.2)
                 pyautogui.click()
+                if not self.handle_battle_area(enter_timeout=22):
+                    self.close_and_exit(click=self.fail_count > 1)
+                    self.fail_count += 1
+                    return 1
                 self.area_state += 1
             else:
                 time.sleep(1)
@@ -2034,6 +2327,30 @@ class DivergentUniverse(UniverseUtils):
             log.info("发生错误，尝试停止运行")
             self.stop()
 
+    def start_door_test(self):
+        self._stop = False
+        keyboard.on_press(self.on_key_press)
+        self.keys = KeyController(self)
+        try:
+            self.route_door_test()
+        except KeyboardInterrupt:
+            print("KeyboardInterrupt")
+            try:
+                log.info("用户终止对门测试")
+            except:
+                pass
+            if not self._stop:
+                self.stop()
+        except Exception as e:
+            if self._stop and isinstance(e, ValueError) and str(e) == "正在退出":
+                log.info("对门测试停止完成")
+                return
+            print_exc()
+            traceback.print_exc()
+            log.info(str(e))
+            log.info("对门测试发生错误，尝试停止运行")
+            self.stop()
+
     def screen_test(self):
         cv.imshow("screen", self.get_screen())
         cv.waitKey(0)
@@ -2055,6 +2372,24 @@ def run():
         pyuac.runAsAdmin()
     else:
         main()
+
+
+def main_door_test():
+    log.info(f"debug(door test): {args.debug}")
+    su = DivergentUniverse(args.debug, args.nums, args.speed)
+    try:
+        su.start_door_test()
+    except Exception:
+        print_exc()
+    finally:
+        su.stop()
+
+
+def run_door_test():
+    if not pyuac.isUserAdmin():
+        pyuac.runAsAdmin()
+    else:
+        main_door_test()
 
 
 if __name__ == "__main__":

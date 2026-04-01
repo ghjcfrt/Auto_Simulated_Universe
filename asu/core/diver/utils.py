@@ -45,7 +45,7 @@ from asu.core.common.interaction import (
 from asu.core.common.interaction import (
     scan_screenshot as common_scan_screenshot,
 )
-from asu.core.common.paths import img_path
+from asu.core.common.paths import img_path, logs_path
 from asu.core.common.runtime import notif as runtime_notif
 from asu.core.common.runtime import set_forground as runtime_set_forground
 from asu.core.common.window import wait_game_window_state
@@ -229,8 +229,8 @@ class UniverseUtils:
             if click:
                 self.click(
                     (
-                        1 - (pt[0][0] + pt[1][0]) / 2 / self.xx,
-                        1 - (pt[0][1] + pt[2][1]) / 2 / self.yy,
+                        (pt[0][0] + pt[1][0]) / 2 / self.xx,
+                        (pt[0][1] + pt[2][1]) / 2 / self.yy,
                     )
                 )
             return 1
@@ -278,9 +278,63 @@ class UniverseUtils:
             return str(jpg_path)
         return img_path(f"{path}.png")
 
+    def _save_check_debug_images(
+        self,
+        local_screen,
+        target,
+        max_loc,
+        max_val,
+        threshold,
+        path,
+        debug_tag="check",
+    ):
+        debug_dir = Path(logs_path("check_debug"))
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        if not hasattr(self, "_check_debug_idx"):
+            self._check_debug_idx = 0
+        self._check_debug_idx += 1
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        template_name = Path(path).stem
+        prefix = f"{ts}_{self._check_debug_idx:04d}_{debug_tag}_{template_name}"
+
+        roi_file = debug_dir / f"{prefix}_roi.png"
+        cv.imwrite(str(roi_file), local_screen)
+
+        vis = local_screen.copy()
+        th, tw = target.shape[:2]
+        x, y = int(max_loc[0]), int(max_loc[1])
+        cv.rectangle(vis, (x, y), (x + tw, y + th), (0, 0, 255), 2)
+        cv.putText(
+            vis,
+            f"score={max_val:.4f} thr={threshold:.4f}",
+            (max(0, x - 2), max(16, y - 6)),
+            cv.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (0, 0, 255),
+            1,
+            cv.LINE_AA,
+        )
+        match_file = debug_dir / f"{prefix}_matched.png"
+        cv.imwrite(str(match_file), vis)
+
+        print(
+            f"[check debug] {debug_tag} max_val={max_val:.4f}, threshold={threshold:.4f}, roi={roi_file}"
+        )
+
     # 判断截图中匹配中心点附近是否存在匹配模板
     # 模板匹配参数：模板路径、中心点、遮罩区域与匹配阈值
-    def check(self, path, x, y, mask=None, threshold=None, large=True):
+    def check(
+        self,
+        path,
+        x,
+        y,
+        mask=None,
+        threshold=None,
+        large=True,
+        debug_save=False,
+        debug_tag=None,
+    ):
         if threshold is None:
             threshold = self.threshold
         path = self.format_path(path)
@@ -327,14 +381,24 @@ class UniverseUtils:
             return False
         result = cv.matchTemplate(local_screen, target, cv.TM_CCORR_NORMED)
         min_val, max_val, min_loc, max_loc = cv.minMaxLoc(result)
+        if debug_save:
+            self._save_check_debug_images(
+                local_screen=local_screen,
+                target=target,
+                max_loc=max_loc,
+                max_val=max_val,
+                threshold=threshold,
+                path=path,
+                debug_tag=debug_tag or "check",
+            )
         self.tx = (
             x
-            - (max_loc[0] - 0.5 * local_screen.shape[1] + 0.5 * target.shape[1])
+            + (max_loc[0] - 0.5 * local_screen.shape[1] + 0.5 * target.shape[1])
             / self.xx
         )
         self.ty = (
             y
-            - (max_loc[1] - 0.5 * local_screen.shape[0] + 0.5 * target.shape[0])
+            + (max_loc[1] - 0.5 * local_screen.shape[0] + 0.5 * target.shape[0])
             / self.yy
         )
         if path == img_path("run.jpg") and 0:
@@ -342,11 +406,15 @@ class UniverseUtils:
             cv.imwrite("target.jpg", target)
             cv.imwrite("local.jpg", local_screen)
         self.tm = max_val
-        if max_val > threshold:
+        if max_val >= threshold:
             if self.last_info != path:
                 log.info("匹配到图片 %s 相似度 %f 阈值 %f" % (path, max_val, threshold))
+            elif debug_save:
+                log.info(
+                    "匹配到图片(重复) %s 相似度 %f 阈值 %f" % (path, max_val, threshold)
+                )
             self.last_info = path
-        return max_val > threshold
+        return max_val >= threshold
 
     def click_img(self, path, threshold=0.95):
         path = self.format_path(path)

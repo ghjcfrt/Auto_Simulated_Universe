@@ -227,8 +227,8 @@ class UniverseUtils:
             if click:
                 self.click(
                     (
-                        1 - (pt[0][0] + pt[1][0]) / 2 / self.xx,
-                        1 - (pt[0][1] + pt[2][1]) / 2 / self.yy,
+                        (pt[0][0] + pt[1][0]) / 2 / self.xx,
+                        (pt[0][1] + pt[2][1]) / 2 / self.yy,
                     )
                 )
             return 1
@@ -300,12 +300,12 @@ class UniverseUtils:
         min_val, max_val, min_loc, max_loc = cv.minMaxLoc(result)
         self.tx = (
             x
-            - (max_loc[0] - 0.5 * local_screen.shape[1] + 0.5 * target.shape[1])
+            + (max_loc[0] - 0.5 * local_screen.shape[1] + 0.5 * target.shape[1])
             / self.xx
         )
         self.ty = (
             y
-            - (max_loc[1] - 0.5 * local_screen.shape[0] + 0.5 * target.shape[0])
+            + (max_loc[1] - 0.5 * local_screen.shape[0] + 0.5 * target.shape[0])
             / self.yy
         )
         if path == img_path("run.jpg") and 0:

@@ -85,7 +85,6 @@ class DivergentUniverse(UniverseUtils):
         self._auto_battle_probe_seen_any = False
         self._battle_ui_detection_enabled = True
         self._entered_universe_scene = False
-        self._team_ocr_debug_idx = 0
 
         self.init_floor()
         self.saved_num = 0
@@ -153,9 +152,7 @@ class DivergentUniverse(UniverseUtils):
             area_text = self.clean_text(
                 self.ts.ocr_one_row(self.screen, [50, 350, 3, 35]), char=0
             )
-            if not (
-                "位面" in area_text or "区域" in area_text or "第" in area_text
-            ):
+            if not ("位面" in area_text or "区域" in area_text or "第" in area_text):
                 time.sleep(0.3)
                 continue
 
@@ -163,6 +160,9 @@ class DivergentUniverse(UniverseUtils):
             aligned = self.align_to_door(timeout=6)
             if not aligned:
                 aligned = self.recover_after_align_fail()
+            if not aligned:
+                log.info("对门测试: 常规对门失败，开始整圈扫描")
+                aligned = self._full_turn_align_scan(total_turn=360, step=12)
 
             if not aligned:
                 log.warning("对门测试: 对门失败")
@@ -421,38 +421,6 @@ class DivergentUniverse(UniverseUtils):
     def test(self):
         self.find_team_member()
 
-    def _save_team_slot_ocr_image(self, screen, box, slot, raw_name, clean_name):
-        if screen is None or getattr(screen, "size", 0) == 0:
-            return
-        h, w = screen.shape[:2]
-        x1, x2, y1, y2 = box
-        x1 = max(0, min(w, int(x1)))
-        x2 = max(0, min(w, int(x2)))
-        y1 = max(0, min(h, int(y1)))
-        y2 = max(0, min(h, int(y2)))
-        if x1 >= x2 or y1 >= y2:
-            return
-
-        crop = screen[y1:y2, x1:x2]
-        if crop.size == 0:
-            return
-
-        self._team_ocr_debug_idx += 1
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-        save_dir = logs_path("team_ocr")
-        os.makedirs(save_dir, exist_ok=True)
-        base_name = f"{ts}_{self._team_ocr_debug_idx:04d}_slot{slot}"
-        save_path = os.path.join(
-            save_dir,
-            f"{base_name}.png",
-        )
-        cv.imwrite(save_path, crop)
-        meta_path = os.path.join(save_dir, f"{base_name}.txt")
-        with open(meta_path, "w", encoding="utf-8") as f:
-            f.write(f"slot={slot}\n")
-            f.write(f"raw={raw_name}\n")
-            f.write(f"clean={clean_name}\n")
-
     def _check_battle_c_btn(self):
         # 固定 ROI：左上(0,900) 右下(127,950)，按当前分辨率等比换算。
         if self.screen is None or self.screen.size == 0:
@@ -507,7 +475,6 @@ class DivergentUniverse(UniverseUtils):
             screen = self.get_screen()
             raw_name = (self.ts.ocr_one_row(screen, b) or "").strip()
             name = config.normalize_character_name(raw_name)
-            self._save_team_slot_ocr_image(screen, b, i + 1, raw_name, name)
             if name in self.character_prior:
                 team_member[name] = i
             if return_details:
@@ -900,189 +867,177 @@ class DivergentUniverse(UniverseUtils):
         return self._resolve_post_battle_settlement()
 
     # 新差分找门
-    def _ensure_door_templates(self):
-        if hasattr(self, "door_templates"):
+    def _ensure_all_door_template(self):
+        if hasattr(self, "all_door_tpl"):
             return
-        self.door_templates = {}
-        widths = []
-        for i in range(1, 5):
-            tpl = cv.imread(img_path("divergent", f"door{i}.png"))
-            if tpl is not None:
-                self.door_templates[i] = tpl
-                widths.append((i, tpl.shape[1]))
-        if widths:
-            width_set = {w for _, w in widths}
-            if len(width_set) > 1:
-                log.warning(f"door模板宽度不一致，建议统一：{widths}")
-
-    def _match_single_door_tpl(self, roi_edge, tpl_edge, tpl_id, scale):
-        roi_h, roi_w = roi_edge.shape[:2]
-        th, tw = tpl_edge.shape[:2]
-        rw, rh = max(1, int(tw * scale)), max(1, int(th * scale))
-        if rw >= roi_w or rh >= roi_h:
-            return None
-
-        scaled = cv.resize(tpl_edge, (rw, rh), interpolation=cv.INTER_LINEAR)
-        result = cv.matchTemplate(roi_edge, scaled, cv.TM_CCOEFF_NORMED)
-        _, conf, _, max_loc = cv.minMaxLoc(result)
-        center_x = max_loc[0] + rw / 2
-        return {
-            "tpl_id": tpl_id,
-            "scale": scale,
-            "conf": conf,
-            "center_x": center_x,
-            "width": rw,
+        tpl = cv.imread(img_path("divergent", "all_door.png"))
+        if tpl is None:
+            self.all_door_tpl = None
+            log.error("模板读取失败: divergent/all_door.png")
+            return
+        tpl_hsv = cv.cvtColor(tpl, cv.COLOR_BGR2HSV)
+        tpl_pink, tpl_yellow, _, _ = self._make_door_color_masks(tpl_hsv)
+        self.all_door_tpl = {
+            "edge": cv.Canny(tpl, 50, 150),
+            "pink": tpl_pink,
+            "yellow": tpl_yellow,
         }
 
-    def _scan_door_templates(self, roi_edge):
-        self._ensure_door_templates()
-        best = None
-        # 模板优先级：1 -> 2 -> 3 -> 4
-        for tpl_id in sorted(self.door_templates.keys()):
-            tpl = self.door_templates[tpl_id]
-            tpl_edge = cv.Canny(tpl, 50, 150)
-            for scale in [0.85, 1.0, 1.15]:
-                match = self._match_single_door_tpl(roi_edge, tpl_edge, tpl_id, scale)
-                if match is None:
-                    continue
-                if best is None:
-                    best = match
-                    continue
-                # 同分数时偏向编号更小模板（门更近）
-                best_score = best["conf"] - 0.015 * (best["tpl_id"] - 1)
-                cur_score = match["conf"] - 0.015 * (match["tpl_id"] - 1)
-                if cur_score > best_score:
-                    best = match
-            if best is not None and best["tpl_id"] == tpl_id and best["conf"] > 0.82:
-                break
-        return best
+    def _enhance_mask_connectivity(self, mask_bin):
+        # 与 door_template_debug 保持一致：闭开运算并过滤小连通域。
+        mask_u8 = (mask_bin > 0).astype(np.uint8)
+        kernel = np.ones((3, 3), dtype=np.uint8)
+        mask_u8 = cv.morphologyEx(mask_u8, cv.MORPH_CLOSE, kernel, iterations=1)
+        mask_u8 = cv.morphologyEx(mask_u8, cv.MORPH_OPEN, kernel, iterations=1)
 
-    def _match_locked_template_first(self, roi_edge):
-        self._ensure_door_templates()
-        prefer_tpl = None
-        if hasattr(self, "last_tpl") and self.last_tpl in self.door_templates:
-            prefer_tpl = self.last_tpl
-        elif hasattr(self, "locked_tpl") and self.locked_tpl in self.door_templates:
-            prefer_tpl = self.locked_tpl
+        num_labels, labels, stats, _ = cv.connectedComponentsWithStats(
+            mask_u8, connectivity=8
+        )
+        if num_labels <= 1:
+            return mask_u8.astype(np.float32)
 
-        if prefer_tpl is None:
+        fg_area = int(mask_u8.sum())
+        min_area = max(6, int(fg_area * 0.005))
+        kept = np.zeros_like(mask_u8, dtype=np.uint8)
+        for comp_id in range(1, num_labels):
+            area = int(stats[comp_id, cv.CC_STAT_AREA])
+            if area >= min_area:
+                kept[labels == comp_id] = 1
+
+        if int(kept.sum()) == 0:
+            largest_idx = 1 + int(np.argmax(stats[1:, cv.CC_STAT_AREA]))
+            kept[labels == largest_idx] = 1
+
+        return kept.astype(np.float32)
+
+    def _normalized_mask_overlap_map(self, roi_mask, tpl_mask):
+        # 与 door_template_debug 保持一致：面积归一化重叠评分。
+        roi_bin = self._enhance_mask_connectivity(roi_mask)
+        tpl_bin = self._enhance_mask_connectivity(tpl_mask)
+        tpl_area = float(tpl_bin.sum())
+        if tpl_area <= 1e-6:
+            out_h = roi_bin.shape[0] - tpl_bin.shape[0] + 1
+            out_w = roi_bin.shape[1] - tpl_bin.shape[1] + 1
+            return np.zeros((max(1, out_h), max(1, out_w)), dtype=np.float32)
+        overlap_map = cv.matchTemplate(roi_bin, tpl_bin, cv.TM_CCORR)
+        return overlap_map / tpl_area
+
+    def _make_door_color_masks(self, hsv_img):
+        pink = cv.inRange(hsv_img, np.array([140, 55, 70]), np.array([175, 255, 255]))
+        yellow = cv.inRange(hsv_img, np.array([18, 65, 85]), np.array([42, 255, 255]))
+        # 玻璃主体：深蓝灰 #57597e -> HSV(118, 79, 126) H~113-123, S~49-109, V~96-156
+        glass_cyan_green = cv.inRange(
+            hsv_img, np.array([113, 49, 96]), np.array([123, 109, 156])
+        )
+        # 玻璃高光：高亮区域 V>180, S<60
+        glass_highlight = cv.inRange(
+            hsv_img, np.array([0, 0, 180]), np.array([180, 60, 255])
+        )
+        return pink, yellow, glass_cyan_green, glass_highlight
+
+    def _match_all_door_fullscreen(self, screen_bgr):
+        self._ensure_all_door_template()
+        if self.all_door_tpl is None:
             return None
 
-        tpl = self.door_templates[prefer_tpl]
-        tpl_edge = cv.Canny(tpl, 50, 150)
-        base_scale = getattr(self, "locked_scale", 1.0)
-        scales = [
-            max(0.75, base_scale * 0.92),
-            base_scale,
-            min(1.25, base_scale * 1.08),
-        ]
+        roi_h, roi_w = screen_bgr.shape[:2]
+        roi_edge = cv.Canny(screen_bgr, 50, 150)
+        roi_hsv = cv.cvtColor(screen_bgr, cv.COLOR_BGR2HSV)
+        roi_pink, roi_yellow, _, _ = self._make_door_color_masks(roi_hsv)
+
+        tpl_edge = self.all_door_tpl["edge"]
+        tpl_pink = self.all_door_tpl["pink"]
+        tpl_yellow = self.all_door_tpl["yellow"]
+        th, tw = tpl_edge.shape[:2]
+
         best = None
-        for scale in scales:
-            match = self._match_single_door_tpl(
-                roi_edge, tpl_edge, prefer_tpl, float(scale)
+        # 与 door_template_debug 保持一致，避免实机和离线评分偏移。
+        for scale in [0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3]:
+            rw, rh = max(1, int(tw * scale)), max(1, int(th * scale))
+            if rw >= roi_w or rh >= roi_h:
+                continue
+
+            scaled_edge = cv.resize(tpl_edge, (rw, rh), interpolation=cv.INTER_LINEAR)
+            scaled_pink = cv.resize(tpl_pink, (rw, rh), interpolation=cv.INTER_NEAREST)
+            scaled_yellow = cv.resize(
+                tpl_yellow, (rw, rh), interpolation=cv.INTER_NEAREST
             )
-            if match is not None and (best is None or match["conf"] > best["conf"]):
-                best = match
+
+            edge_map = cv.matchTemplate(roi_edge, scaled_edge, cv.TM_CCORR_NORMED)
+            pink_map = self._normalized_mask_overlap_map(roi_pink, scaled_pink)
+            yellow_map = self._normalized_mask_overlap_map(roi_yellow, scaled_yellow)
+
+            frame_color_map = 0.70 * pink_map + 0.30 * yellow_map
+            # door_template_debug 专用打分比例：frame_color 70% + edge 30%
+            score_map = 0.70 * frame_color_map + 0.30 * edge_map
+
+            _, conf, _, max_loc = cv.minMaxLoc(score_map)
+            cx = max_loc[0] + rw / 2
+            cy = max_loc[1] + rh / 2
+            item = {
+                "conf": float(conf),
+                "scale": float(scale),
+                "center_x": float(cx),
+                "center_y": float(cy),
+                "width": int(rw),
+                "height": int(rh),
+                "x": int(max_loc[0]),
+                "y": int(max_loc[1]),
+            }
+            if best is None or item["conf"] > best["conf"]:
+                best = item
+
         return best
 
-    def _validate_door_structure(self, roi_raw, center_x):
-        # 轻量结构校验：中心两侧应存在更多黄色而非粉色
-        hsv = cv.cvtColor(roi_raw, cv.COLOR_BGR2HSV)
-        h, w = roi_raw.shape[:2]
-        cx = int(max(0, min(w - 1, center_x)))
-        left0, left1 = max(0, cx - 28), max(1, cx - 8)
-        right0, right1 = min(w - 1, cx + 8), min(w, cx + 28)
-        if left0 >= left1 or right0 >= right1:
-            return False
-        band = np.concatenate([hsv[:, left0:left1], hsv[:, right0:right1]], axis=1)
-
-        yellow = cv.inRange(band, np.array([18, 70, 90]), np.array([42, 255, 255]))
-        pink = cv.inRange(band, np.array([140, 60, 80]), np.array([175, 255, 255]))
-        y_cnt = int(np.sum(yellow > 0))
-        p_cnt = int(np.sum(pink > 0))
-        return y_cnt > 30 and y_cnt > p_cnt * 1.4
-
-    def _get_door_match(self, roi_raw):
-        roi_edge = cv.Canny(roi_raw, 50, 150)
-
-        # 优先使用上一帧模板，避免每帧切模板
-        locked_match = self._match_locked_template_first(roi_edge)
-        if locked_match is not None:
-            last_conf = getattr(self, "last_conf", 1.0)
-            conf_drop = last_conf - locked_match["conf"]
-            if locked_match["conf"] > 0.6 and conf_drop < 0.17:
-                return locked_match
-
-        # 丢失或置信下降明显，才切换模板
-        return self._scan_door_templates(roi_edge)
+    def _full_turn_align_scan(self, total_turn=360, step=12):
+        turned = 0
+        while turned < total_turn:
+            if self._stop:
+                return 0
+            self.mouse_move(step)
+            time.sleep(0.5)
+            turned += step
+            if self.align_to_door(timeout=1):
+                log.info(f"对门测试: 整圈扫描命中，累计转动{turned}")
+                return 1
+        return 0
 
     # 新差分找门
     def align_to_door(self, timeout=8):
         tm = time.time()
-        if not hasattr(self, "door_center"):
-            self.door_center = None
-        if not hasattr(self, "door_miss_frames"):
-            self.door_miss_frames = 0
         while time.time() - tm < timeout:
             if self._stop:
                 return 0
             self.get_screen()
-            roi = self.screen[115:920, 900:1030]
-            match = self._get_door_match(roi)
-            if match is None:
-                self.door_miss_frames += 1
-                self.mouse_move(6)
-                time.sleep(0.2)
+            match = self._match_all_door_fullscreen(self.screen)
+            if match is None or match["conf"] < 0.6:
+                self.mouse_move(8)
+                log.info("[对门] 未命中 all_door 或低于阈值0.60，右移视角继续搜索")
+                time.sleep(0.5)
                 continue
 
-            conf = match["conf"]
-            new_center = match["center_x"]
-            structure_ok = self._validate_door_structure(roi, new_center)
-
-            accepted = False
-            if conf > 0.75:
-                accepted = True
-            elif conf > 0.6 and self.door_center is not None:
-                # 中置信：结合上一帧
-                new_center = 0.6 * self.door_center + 0.4 * new_center
-                accepted = True
-
-            if accepted and structure_ok:
-                if self.door_center is None:
-                    self.door_center = new_center
-                else:
-                    # 中心平滑
-                    self.door_center = 0.7 * self.door_center + 0.3 * new_center
-                self.door_miss_frames = 0
-                self.locked_tpl = match["tpl_id"]
-                self.last_tpl = match["tpl_id"]
-                self.locked_scale = match["scale"]
-                self.last_conf = conf
-            else:
-                self.door_miss_frames += 1
-                if self.door_miss_frames >= 3:
-                    self.locked_tpl = None
-                self.mouse_move(4)
-                time.sleep(0.12)
-                continue
-
-            # 以“游戏画面中心”为目标，而不是显示器中心。
-            roi_x0 = 900
-            game_center_x = self.screen.shape[1] / 2
-            game_center_in_roi = game_center_x - roi_x0
-            bias = self.door_center - game_center_in_roi
-            # 死区防抖
-            if abs(bias) < 10 and conf > 0.6:
+            door_center_x = match["center_x"]
+            # 对齐窗口改为 x in [930, 1000]（按 1920 基准等比换算）。
+            target_left = int(self.screen.shape[1] * 930 / 1920)
+            target_right = int(self.screen.shape[1] * 1000 / 1920)
+            if target_left <= door_center_x <= target_right:
                 log.info(
-                    f"门对准完成 tpl=door{self.locked_tpl} conf={conf:.3f} center={self.door_center:.1f}"
+                    f"门对准完成(all_door) conf={match['conf']:.3f} center_x={door_center_x:.1f} window=[{target_left},{target_right}]"
                 )
                 return 1
 
-            move_angle = max(-10, min(10, int(bias / 16)))
+            # 一次计算并水平转向到位；不做垂直移动。
+            target_center_x = (target_left + target_right) / 2
+            bias = door_center_x - target_center_x
+            move_angle = int(round(bias / 16.0))
             if move_angle == 0:
                 move_angle = 1 if bias > 0 else -1
             self.mouse_move(move_angle)
-            time.sleep(0.12)
+            log.info(
+                f"[对门] 一次转向: conf={match['conf']:.3f}, bias={bias:+.1f}, move={move_angle:+d}"
+            )
+            # 每次转向后等待0.5s，再进行下一次检测。
+            time.sleep(0.5)
         return 0
 
     def move_forward_to_door_f(self, timeout=20):
@@ -1251,31 +1206,21 @@ class DivergentUniverse(UniverseUtils):
         return 1
 
     def recover_after_align_fail(self):
-        # 对门失败时，执行双向小机动并短超时重试，避免单向偏移导致持续识别失败。
-        side_key = "d" if self.portal_cnt % 2 else "a"
-        side_yaw = 8 if side_key == "d" else -8
-
-        keyops.keyDown(side_key)
-        time.sleep(0.35)
-        keyops.keyUp(side_key)
-
+        # 对门失败时，仅使用前进+水平转向恢复，不使用 a/s/d 位移。
         keyops.keyDown("w")
-        time.sleep(0.2)
+        time.sleep(0.25)
         keyops.keyUp("w")
 
-        self.mouse_move(side_yaw)
+        self.mouse_move(10)
+        time.sleep(0.5)
         if self.align_to_door(timeout=3):
             return 1
 
-        opposite_key = "a" if side_key == "d" else "d"
-        keyops.keyDown(opposite_key)
-        time.sleep(0.45)
-        keyops.keyUp(opposite_key)
-
-        self.mouse_move(-side_yaw * 2)
+        self.mouse_move(-20)
+        time.sleep(0.5)
 
         keyops.keyDown("w")
-        time.sleep(0.2)
+        time.sleep(0.25)
         keyops.keyUp("w")
 
         return self.align_to_door(timeout=3)

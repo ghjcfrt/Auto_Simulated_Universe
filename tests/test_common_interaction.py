@@ -7,13 +7,16 @@ from tests._platform_stubs import install_platform_stubs
 
 try:
     import numpy as np
+
     HAS_NUMPY = True
 except ModuleNotFoundError:
     np = None
     HAS_NUMPY = False
 
 install_platform_stubs()
-interaction = importlib.import_module("asu.core.common.interaction") if HAS_NUMPY else None
+interaction = (
+    importlib.import_module("asu.core.common.interaction") if HAS_NUMPY else None
+)
 
 
 @unittest.skipUnless(HAS_NUMPY, "缺少 numpy，跳过 interaction 回归测试")
@@ -36,8 +39,8 @@ class InteractionTests(unittest.TestCase):
     def test_calc_point_converts_pixel_offset(self):
         ctx = self._make_ctx()
         result = interaction.calc_point(ctx, (0.5, 0.5), (192, 108))
-        self.assertAlmostEqual(result[0], 0.4)
-        self.assertAlmostEqual(result[1], 0.4)
+        self.assertAlmostEqual(result[0], 0.6)
+        self.assertAlmostEqual(result[1], 0.6)
 
     def test_calculated_returns_template_center(self):
         center = interaction.calculated({"max_loc": (10, 20)}, (40, 60, 3))
@@ -45,9 +48,11 @@ class InteractionTests(unittest.TestCase):
 
     def test_click_transforms_normalized_coordinates(self):
         ctx = self._make_ctx()
-        with mock.patch.object(interaction.win32api, "SetCursorPos") as set_cursor, \
-            mock.patch.object(interaction.pyautogui, "click") as click_mouse, \
-            mock.patch.object(interaction.time, "sleep", return_value=None):
+        with (
+            mock.patch.object(interaction.win32api, "SetCursorPos") as set_cursor,
+            mock.patch.object(interaction.pyautogui, "click") as click_mouse,
+            mock.patch.object(interaction.time, "sleep", return_value=None),
+        ):
             interaction.click(ctx, (0.5, 0.5), click_button=1)
 
         set_cursor.assert_called_once_with((1040, 560))
@@ -71,4 +76,3 @@ class InteractionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

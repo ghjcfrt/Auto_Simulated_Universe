@@ -700,19 +700,66 @@ class UniverseUtils:
         time.sleep(1)
 
     def check_f(self, is_in=[], check_text=1):
-        if self.check("f", 0.4443, 0.4417, mask="mask_f1", threshold=0.95):
-            if not check_text:
-                return 1
-            text = self.ts.ocr_one_row(self.screen, [1206, 1437, 587, 635])
-            print(text)
-            if len(text):
-                log.info("识别到交互信息：" + text)
-                for i in is_in:
-                    if i in text:
-                        return 1
-            return 0
-        else:
+        h, w = self.screen.shape[:2]
+        sx = w / 1920.0
+        sy = h / 1080.0
+
+        fx1 = max(0, min(w, int(round(1070 * sx))))
+        fx2 = max(0, min(w, int(round(1125 * sx))))
+        fy1 = max(0, min(h, int(round(580 * sy))))
+        fy2 = max(0, min(h, int(round(645 * sy))))
+        if fx2 <= fx1 or fy2 <= fy1:
             return None
+
+        local_screen = self.screen[fy1:fy2, fx1:fx2]
+        target_path = self.format_path("f")
+        target = cv.imread(target_path)
+        if target is None:
+            log.error(f"模板读取失败: {target_path}")
+            return None
+
+        threshold = 0.95
+        if config.mapping[0] != "f":
+            target = self.gen_hotkey_img(config.mapping[0])
+            threshold -= 0.01
+
+        target_w = max(1, int(round(self.scx * target.shape[1])))
+        target_h = max(1, int(round(self.scx * target.shape[0])))
+        target = cv.resize(target, dsize=(target_w, target_h))
+
+        if (
+            local_screen.size == 0
+            or local_screen.shape[0] < target.shape[0]
+            or local_screen.shape[1] < target.shape[1]
+        ):
+            return None
+
+        result = cv.matchTemplate(local_screen, target, cv.TM_CCORR_NORMED)
+        _min_val, max_val, _min_loc, max_loc = cv.minMaxLoc(result)
+        self.tm = max_val
+        self.tx = (fx1 + max_loc[0] + target.shape[1] / 2) / self.xx
+        self.ty = (fy1 + max_loc[1] + target.shape[0] / 2) / self.yy
+
+        if max_val < threshold:
+            return None
+
+        if self.last_info != target_path:
+            log.info(
+                "匹配到图片 %s 相似度 %f 阈值 %f" % (target_path, max_val, threshold)
+            )
+        self.last_info = target_path
+
+        if not check_text:
+            return 1
+
+        text = self.ts.ocr_one_row(self.screen, [1207, 1530, 585, 640])
+        print(text)
+        if len(text):
+            log.info("识别到交互信息：" + text)
+            for i in is_in:
+                if i in text:
+                    return 1
+        return 0
 
     def get_tar(self):
         # 寻找最近的目标点

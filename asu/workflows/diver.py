@@ -1077,7 +1077,7 @@ class DivergentUniverse(UniverseUtils):
             else:
                 battle_ui_missing_since = None
             if self.check_f(check_text=0):
-                f_text = self.ts.ocr_one_row(self.screen, [1206, 1437, 587, 635])
+                f_text = self.ts.ocr_one_row(self.screen, [1207, 1530, 585, 640])
                 if is_portal_f_text(f_text):
                     log.info(f"识别到门交互F文案：{f_text}")
                     keyops.keyUp("w")

@@ -507,7 +507,10 @@ class DivergentUniverse(UniverseUtils):
                     cv.imwrite(roi_file, roi)
                     log.debug(f"ROI截图已保存: {roi_file}")
 
-            raw_name = (self.ts.ocr_one_row(screen, b) or "").strip()
+            # 队伍配队识别：按需求不做文本预处理，直接使用原始 OCR 结果。
+            raw_name = str(self.ts.ocr_one_row(screen, b) or "")
+            # 仅保留 character.json 的“精确键”映射，不进行 clean/normalize。
+            # name = str(config.match.get(raw_name, raw_name))
             name = config.normalize_character_name(raw_name)
             matched_csv = name in self.character_prior
             is_real_char = name in all_real_characters
@@ -863,6 +866,11 @@ class DivergentUniverse(UniverseUtils):
             time.sleep(0.2)
         return 0
 
+    # 进场前检测 f 键是否可按（互动点检测）
+    def _check_enter_interact_f(self):
+        # 使用模板匹配检测 F 按钮是否可见（不限制文案）
+        return self.check_f(check_text=0)
+
     # 战斗、精英位面处理：触发战斗并等待结束
     def handle_battle_area(self, enter_timeout=18):
         tm = time.time()
@@ -890,6 +898,20 @@ class DivergentUniverse(UniverseUtils):
             # 未确认入战前持续 w+左键触发。
             self.press("w", 0.45)
             pyautogui.click()
+
+            # 未确认入战前，先检测是否可以按 f（互动点）
+            if self._check_enter_interact_f():
+                log.info("进场互动检测: 发现 f 可按")
+                self.press("f")
+                time.sleep(0.4)
+                # 按 f 后检测 default.json 中的动作
+                action_triggered = self.run_static()
+                if action_triggered:
+                    log.info(f"进场互动检测: 执行了动作 {action_triggered}")
+                time.sleep(0.3)
+                # 继续回到 w 攻击逻辑的下一次迭代
+                continue
+
             time.sleep(0.15)
 
         if not entered_battle:

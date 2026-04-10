@@ -9,7 +9,9 @@ from asu.apps.diver import DivergentUniverse, version
 from asu.apps.simul import SimulatedUniverse
 from asu.core.common.paths import img_path
 from asu.core.common.runtime import notif
-from asu.core.diver.args import args
+from asu.core.diver.args import get_args
+
+args = get_args()
 from asu.core.diver.config import config as config_diver
 from asu.core.platform.log import my_print as print
 from asu.core.platform.log import print_exc

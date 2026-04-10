@@ -21,7 +21,7 @@ import yaml
 
 import asu.core.diver.keyops as keyops
 from asu.core.common.paths import actions_path, img_path, logs_path, project_path
-from asu.core.diver.args import args
+from asu.core.diver.args import get_args
 from asu.core.diver.config import config
 from asu.core.diver.constants import DEFAULT_PORTAL_PRIOR
 from asu.core.diver.keyops import KeyController
@@ -31,6 +31,7 @@ from asu.core.platform.log import my_print as print
 
 # 版本号
 version = "v8.042.1"
+args = get_args()
 
 
 class DivergentUniverse(UniverseUtils):
@@ -85,6 +86,7 @@ class DivergentUniverse(UniverseUtils):
         self._auto_battle_probe_seen_any = False
         self._battle_ui_detection_enabled = True
         self._entered_universe_scene = False
+        self._next_debug_last_save = 0.0
 
         self.init_floor()
         self.saved_num = 0
@@ -471,11 +473,59 @@ class DivergentUniverse(UniverseUtils):
         ]  # x1, x2, y1, y2
         team_member = {}
         detect_details = []
+
+        # 调试模式：保存ROI截图
+        save_roi = self.debug > 0
+        if save_roi:
+            roi_save_dir = logs_path("team_detection_roi")
+            import os
+
+            os.makedirs(roi_save_dir, exist_ok=True)
+            from datetime import datetime
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # 真实角色集合：内置全角色列表 + character.json 的映射值。
+        # 这样即使新角色暂未写入 character.csv，也能完成队伍识别。
+        all_real_characters = set()
+        if hasattr(config, "all_list"):
+            all_real_characters.update(config.all_list)
+        if hasattr(config, "match"):
+            all_real_characters.update(config.match.values())
+
         for i, b in enumerate(boxes):
             screen = self.get_screen()
+
+            # 保存ROI截图
+            if save_roi and screen is not None:
+                x1, x2, y1, y2 = b
+                roi = screen[y1:y2, x1:x2]
+                if roi is not None and roi.size > 0:
+                    roi_file = os.path.join(
+                        roi_save_dir, f"{timestamp}_slot{i + 1}.png"
+                    )
+                    cv.imwrite(roi_file, roi)
+                    log.debug(f"ROI截图已保存: {roi_file}")
+
             raw_name = (self.ts.ocr_one_row(screen, b) or "").strip()
             name = config.normalize_character_name(raw_name)
-            if name in self.character_prior:
+            matched_csv = name in self.character_prior
+            is_real_char = name in all_real_characters
+            recognized = is_real_char
+
+            # 调试日志：详细输出识别过程
+            if save_roi or not recognized:
+                log.info(
+                    f"[队伍检测 槽位{i + 1}] 原始文本='{raw_name}' -> 规范化='{name}' -> 匹配CSV={matched_csv} | 真实角色={is_real_char}"
+                )
+                if name and not is_real_char:
+                    log.warning(
+                        f"  【未找到角色】'{name}' 不在真实角色列表中"
+                        f"\n  建议：如果这是真实角色，请在 actions/character.json 中添加别名"
+                        f"\n  部分真实角色: {sorted(list(all_real_characters))[:15]}"
+                    )
+
+            if recognized:
                 team_member[name] = i
             if return_details:
                 detect_details.append(
@@ -483,7 +533,8 @@ class DivergentUniverse(UniverseUtils):
                         "slot": i + 1,
                         "raw": raw_name,
                         "clean": name,
-                        "matched": name in self.character_prior,
+                        "matched": matched_csv,
+                        "is_real": is_real_char,
                         "long_range": name in config.long_range_list,
                     }
                 )
@@ -543,15 +594,16 @@ class DivergentUniverse(UniverseUtils):
             res = self.get_text_type(
                 self.area_text,
                 [
-                    "事件",
-                    "铸造",
-                    "奖励",
-                    "异常",
-                    "商店",
-                    "首领",
                     "战斗",
-                    "遭遇",
+                    "商店",
+                    "铸造",
+                    "异常",
+                    "事件",
                     "财富",
+                    "奖励",
+                    "冒险",
+                    "首领",
+                    "遭遇",
                     "休整",
                     "位面",
                 ],
@@ -572,21 +624,25 @@ class DivergentUniverse(UniverseUtils):
 
     def find_portal(self, type=None):
         prefer_portal = {
-            "奖励": 3,
-            "事件": 3,
-            "战斗": 2,
+            "战斗": 1,
+            "商店": 3,
+            "铸造": 3,
             "异常": 2,
-            "商店": 1,
-            "财富": 1,
+            "事件": 2,
+            "财富": 3,
+            "奖励": 2,
+            "冒险": 3,
         }
         if self.speed:
             prefer_portal = {
+                "战斗": 1,
                 "商店": 3,
+                "铸造": 3,
+                "异常": 2,
+                "事件": 2,
                 "财富": 3,
                 "奖励": 2,
-                "事件": 2,
-                "战斗": 1,
-                "异常": 1,
+                "冒险": 3,
             }
             if (self.quan or self.bai_e) and self.allow_e:
                 prefer_portal["战斗"] = 2
@@ -1395,22 +1451,142 @@ class DivergentUniverse(UniverseUtils):
             merged = dict(DEFAULT_PORTAL_PRIOR)
             merged.update(prior)
             prior = merged
-        return sorted(prior.keys(), key=lambda x: prior.get(x, -999), reverse=True)
+        return sorted(prior.keys(), key=lambda x: prior.get(x, -999))
 
-    def _scan_next_candidates(self, priority):
-        roi = [594, 1337, 738, 782]
-        texts = self.ts.find_with_box(roi, forward=1, mode=2)
+    def _scan_next_candidates(self, priority, rois=None):
+        if rois is None:
+            # 保持原有 ROI，不改识别区域，只做定位排查。
+            rois = [[220, 1706, 730, 773]]
         candidates = {}
-        for item in texts:
-            raw_text = str(item.get("raw_text", ""))
-            if "首领" in raw_text:
-                candidates["首领"] = item
+        visible_texts = []
+        scan_debug = []
+        for roi in rois:
+            x1, x2, y1, y2 = [int(v) for v in roi]
+            if self.screen is None or self.screen.size == 0:
+                self.get_screen()
+            crop = self.screen[y1:y2, x1:x2]
+            texts = []
+            used_mode = 2
+            if crop is not None and crop.size > 0:
+                # 使用当前帧进行 OCR，避免 find_with_box(forward=1) 内部再次截屏造成帧不一致。
+                filtered = self.ts.filter_non_white(crop, mode=2)
+                self.ts.forward(filtered)
+                for res in self.ts.res:
+                    r = dict(res)
+                    r["box"] = [
+                        x1 + int(res["box"][0]),
+                        x1 + int(res["box"][1]),
+                        y1 + int(res["box"][2]),
+                        y1 + int(res["box"][3]),
+                    ]
+                    texts.append(r)
+                # mode=2 在某些亮度/UI 状态会过严，空结果时回退到 mode=0 再试一次。
+                if len(texts) == 0:
+                    used_mode = 0
+                    self.ts.forward(crop)
+                    for res in self.ts.res:
+                        r = dict(res)
+                        r["box"] = [
+                            x1 + int(res["box"][0]),
+                            x1 + int(res["box"][1]),
+                            y1 + int(res["box"][2]),
+                            y1 + int(res["box"][3]),
+                        ]
+                        texts.append(r)
+            scan_debug.append(
+                {"roi": list(roi), "used_mode": used_mode, "texts": texts}
+            )
+            for item in texts:
+                raw_text = str(item.get("raw_text", ""))
+                cleaned_text = self.clean_text(raw_text, char=0)
+                if len(raw_text):
+                    visible_texts.append(raw_text)
+                if "首领" in raw_text or "首领" in cleaned_text:
+                    candidates["首领"] = item
+                    continue
+                for area_type in priority:
+                    if area_type in raw_text or area_type in cleaned_text:
+                        if area_type not in candidates:
+                            candidates[area_type] = item
+                        break
+        return candidates, visible_texts, scan_debug
+
+    def _save_next_debug_snapshot(
+        self, tag, rois, scan_debug, candidates, priority, visible_texts
+    ):
+        if self.screen is None or self.screen.size == 0:
+            return
+
+        now = time.time()
+        if now - self._next_debug_last_save < 0.8:
+            return
+        self._next_debug_last_save = now
+
+        save_dir = logs_path("next_station_debug")
+        os.makedirs(save_dir, exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        raw_path = os.path.join(save_dir, f"{ts}_{tag}_raw.png")
+        marked_path = os.path.join(save_dir, f"{ts}_{tag}_marked.png")
+        json_path = os.path.join(save_dir, f"{ts}_{tag}.json")
+
+        cv.imwrite(raw_path, self.screen)
+        marked = self.screen.copy()
+
+        for roi in rois:
+            x1, x2, y1, y2 = [int(v) for v in roi]
+            cv.rectangle(marked, (x1, y1), (x2, y2), (255, 140, 0), 2)
+
+        for group in scan_debug:
+            for item in group.get("texts", []):
+                box = item.get("box")
+                if not box or len(box) != 4:
+                    continue
+                x1, x2, y1, y2 = [int(v) for v in box]
+                cv.rectangle(marked, (x1, y1), (x2, y2), (180, 180, 180), 1)
+
+        for area_type, item in candidates.items():
+            box = item.get("box")
+            if not box or len(box) != 4:
                 continue
-            for area_type in priority:
-                if area_type in raw_text:
-                    candidates[area_type] = item
-                    break
-        return candidates
+            x1, x2, y1, y2 = [int(v) for v in box]
+            cv.rectangle(marked, (x1, y1), (x2, y2), (0, 220, 0), 2)
+            rank = priority.index(area_type) + 1 if area_type in priority else 99
+            cv.putText(
+                marked,
+                f"#{rank}",
+                (x1, max(20, y1 - 6)),
+                cv.FONT_HERSHEY_SIMPLEX,
+                0.55,
+                (0, 220, 0),
+                2,
+            )
+
+        cv.imwrite(marked_path, marked)
+        debug_data = {
+            "tag": tag,
+            "priority": priority,
+            "visible_texts": visible_texts[:30],
+            "rois": rois,
+            "candidates": {
+                k: {"raw_text": str(v.get("raw_text", "")), "box": v.get("box")}
+                for k, v in candidates.items()
+            },
+            "scan_debug": [
+                {
+                    "roi": g.get("roi"),
+                    "texts": [
+                        {"raw_text": str(t.get("raw_text", "")), "box": t.get("box")}
+                        for t in g.get("texts", [])
+                    ],
+                }
+                for g in scan_debug
+            ],
+            "raw_path": raw_path,
+            "marked_path": marked_path,
+        }
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(debug_data, f, ensure_ascii=False, indent=2)
+        log.warning(f"下一站调试截图已保存: {marked_path}")
 
     def _pick_best_visible_next(self, candidates, priority):
         for area_type in priority:
@@ -1423,7 +1599,7 @@ class DivergentUniverse(UniverseUtils):
         return visible[:max_options]
 
     def _get_reroll_count(self):
-        # 用户只提供了 (678, 945) 参考点，这里使用其附近 ROI 识别“重抽 N”。
+        # (678, 945) 参考点，这里使用其附近 ROI 识别“重抽 N”。
         reroll_roi = [560, 900, 920, 980]
         texts = self.ts.find_with_box(reroll_roi, forward=1, mode=2)
         merged = self.merge_text(texts, char=0)
@@ -1436,11 +1612,26 @@ class DivergentUniverse(UniverseUtils):
 
     def next(self):
         priority = self._get_next_priority()
-        self.get_screen()
-        candidates = self._scan_next_candidates(priority)
+        candidates = {}
+        visible_texts = []
+        scan_debug = []
+        rois = [[220, 1706, 730, 800]]
+        # “选择下一站”文本会有短暂淡入，最多重试 3 次降低空识别概率。
+        for _ in range(3):
+            self.get_screen()
+            candidates, visible_texts, scan_debug = self._scan_next_candidates(
+                priority, rois=rois
+            )
+            if len(candidates):
+                break
+            time.sleep(0.12)
 
         # 首领层不会出现其他可选项：直接点击并使用首领专用确认坐标
         if "首领" in candidates:
+            if self.debug:
+                self._save_next_debug_snapshot(
+                    "next_boss", rois, scan_debug, candidates, priority, visible_texts
+                )
             self.click_box(candidates["首领"]["box"])
             time.sleep(0.2)
             self.click_position([690, 963])
@@ -1449,8 +1640,20 @@ class DivergentUniverse(UniverseUtils):
         visible = self._list_visible_next_by_priority(candidates, priority)
         if visible:
             log.info(f"下一站识别候选数量: {len(visible)}，候选: {visible}")
+            if self.debug:
+                self._save_next_debug_snapshot(
+                    "next_ok", rois, scan_debug, candidates, priority, visible_texts
+                )
         else:
-            log.warning("选择下一站：未识别到可用词汇坐标")
+            self._save_next_debug_snapshot(
+                "next_fail", rois, scan_debug, candidates, priority, visible_texts
+            )
+            if len(visible_texts):
+                log.warning(
+                    f"选择下一站：未识别到可用词汇坐标，OCR原文: {visible_texts[:8]}"
+                )
+            else:
+                log.warning("选择下一站：未识别到可用词汇坐标")
             return 0
 
         top_two = priority[:2]
@@ -1488,7 +1691,9 @@ class DivergentUniverse(UniverseUtils):
 
             time.sleep(0.5)
             self.get_screen()
-            candidates = self._scan_next_candidates(priority)
+            candidates, visible_texts, scan_debug = self._scan_next_candidates(
+                priority, rois=rois
+            )
             visible = self._list_visible_next_by_priority(candidates, priority)
             if visible:
                 log.info(f"重抽后识别候选数量: {len(visible)}，候选: {visible}")
@@ -1747,6 +1952,19 @@ class DivergentUniverse(UniverseUtils):
                 )
             else:
                 log.info("战斗站场选择: 跳过切换(未识别到远程角色站位)")
+                # 输出OCR检测到的队伍成员信息
+                if self.team_detect:
+                    log.info(
+                        "OCR检测到的队伍成员: "
+                        + " | ".join(
+                            [
+                                f"{i.get('slot', '?')}号位 raw='{i.get('raw', '')}' clean='{i.get('clean', '')}' matched={int(i.get('matched', 0))} long_range={int(i.get('long_range', 0))}"
+                                for i in self.team_detect
+                            ]
+                        )
+                    )
+                else:
+                    log.info("OCR检测到的队伍成员: 无")
 
         self.get_screen()
         if self.check("divergent/arrow", 0.7833, 0.9231, threshold=0.95):

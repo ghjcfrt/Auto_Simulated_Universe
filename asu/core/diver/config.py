@@ -5,6 +5,7 @@ from typing import Any
 
 import yaml
 
+from asu.core.common.paths import project_path
 from asu.core.diver.constants import (
     ALL_CHARACTER_LIST,
     DEFAULT_PORTAL_PRIOR,
@@ -15,9 +16,8 @@ from asu.core.diver.constants import (
 
 class Config:
     def __init__(self):
-        self.abspath = os.path.dirname(
-            os.path.dirname(os.path.dirname(__file__))
-        )  # 获取项目根目录
+        # 与全局路径工具保持一致，确保读取的是项目根目录下的 actions/info.yml。
+        self.abspath = project_path()
         if getattr(sys, "frozen", False):
             self.abspath = "."
         self.angle = "1.0"

@@ -141,7 +141,7 @@ class DivergentUniverse(UniverseUtils):
             while text != "崩坏：星穹铁道" and text != "云·星穹铁道" and not self._stop:
                 if not warn_game:
                     warn_game = True
-                    log.warning(f"对门测试等待游戏窗口，当前窗口：{text}")
+                    log.warning(f"等待游戏窗口，当前窗口：{text}")
                 time.sleep(0.5)
                 hwnd = win32gui.GetForegroundWindow()
                 text = win32gui.GetWindowText(hwnd)
@@ -211,7 +211,7 @@ class DivergentUniverse(UniverseUtils):
                     tm = time.time()
                     while time.time() - tm < 15:
                         print("trying to stop")
-                        self.press("esc")
+                        self.press("esc", 0.2)
                         time.sleep(2)
                         self.ts.forward(self.get_screen())
                         static_res = self.run_static(action_list=["过量转化"])
@@ -226,9 +226,9 @@ class DivergentUniverse(UniverseUtils):
         else:
             self.last_action_time = time.time()
         if self.end and res == "加载界面":
-            self.press("esc")
+            self.press("esc", 0.2)
             time.sleep(2)
-            self.press("esc")
+            self.press("esc", 0.2)
             self._stop = True
 
     def do_action(self, action) -> int:
@@ -304,6 +304,55 @@ class DivergentUniverse(UniverseUtils):
                 if len(text) and trigger["text"] in self.merge_text(text):
                     return item["name"]
         return ""
+
+    def run_static_with_retry(self, action_list, timeout=5.0, interval=0.35) -> str:
+        tm = time.time()
+        while time.time() - tm < timeout:
+            if self._stop:
+                return ""
+            self.ts.forward(self.get_screen())
+            res = self.run_static(action_list=action_list)
+            if res:
+                return res
+            time.sleep(interval)
+        return ""
+
+    def click_img_with_retry(
+        self, path, timeout=5.0, interval=0.35, threshold=0.9
+    ) -> bool:
+        tm = time.time()
+        while time.time() - tm < timeout:
+            if self._stop:
+                return False
+            self.get_screen()
+            if self.click_img(path, threshold=threshold):
+                return True
+            time.sleep(interval)
+        return False
+
+    def recover_door_fail_by_temp_leave(self):
+        log.warning("[对门] 找门失败，执行暂离重进")
+        self.press("esc", 0.2)
+        time.sleep(0.8)
+
+        leave_res = self.run_static_with_retry(action_list=["退出界面"], timeout=6.0)
+        if leave_res != "退出界面":
+            log.warning("[对门] 未识别到“暂离”按钮，继续执行重进流程")
+        time.sleep(1.2)
+
+        # 先交互进入入口，再触发“启动”流程。
+        self.press("f")
+        time.sleep(0.8)
+
+        start_clicked = self.click_img_with_retry(
+            "divergent/start.png", timeout=6.0, threshold=0.88
+        )
+        if not start_clicked:
+            log.warning("[对门] 未识别到“启动”按钮，尝试直接恢复“继续进度”")
+
+        continue_res = self.run_static_with_retry(action_list=["模式选择"], timeout=6.0)
+        if continue_res != "模式选择":
+            log.warning("[对门] 未识别到“继续进度”按钮")
 
     def select_difficulty(self):
         time.sleep(0.5)
@@ -393,7 +442,7 @@ class DivergentUniverse(UniverseUtils):
             self.total_empty_saves = empty_saves
 
     def close_and_exit(self, click=True):
-        self.press("esc")
+        self.press("esc", 0.2)
         if self.debug and self.floor < 13:
             with open("test.txt", "a") as f:
                 format_string = "%H:%M:%S"
@@ -614,11 +663,11 @@ class DivergentUniverse(UniverseUtils):
             if res == "遭遇":
                 res = "战斗"
             if (res == "位面" or res is None) and deep == 0:
-                self.mouse_move(20)
+                self.mouse_move(20, axis="x")
                 scr = self.screen
                 time.sleep(0.3)
                 self.get_screen()
-                self.mouse_move(-20)
+                self.mouse_move(-20, axis="x")
                 res = self.get_now_area(deep=1)
                 self.screen = scr
             return res
@@ -902,7 +951,7 @@ class DivergentUniverse(UniverseUtils):
             # 未确认入战前，先检测是否可以按 f（互动点）
             if self._check_enter_interact_f():
                 log.info("进场互动检测: 发现 f 可按")
-                self.press("f")
+                self.press("f", 0.2)
                 time.sleep(0.4)
                 # 按 f 后检测 default.json 中的动作
                 action_triggered = self.run_static()
@@ -1072,7 +1121,7 @@ class DivergentUniverse(UniverseUtils):
         while turned < total_turn:
             if self._stop:
                 return 0
-            self.mouse_move(step)
+            self.mouse_move(step, axis="x")
             time.sleep(0.5)
             turned += step
             if self.align_to_door(timeout=1):
@@ -1083,15 +1132,34 @@ class DivergentUniverse(UniverseUtils):
     # 新差分找门
     def align_to_door(self, timeout=8):
         tm = time.time()
+        round_count = 0  # 轮数计数器
+        moves_this_round = 0  # 本轮左右移动计数
+
         while time.time() - tm < timeout:
             if self._stop:
                 return 0
             self.get_screen()
             match = self._match_all_door_fullscreen(self.screen)
             if match is None or match["conf"] < 0.6:
-                self.mouse_move(8)
-                log.info("[对门] 未命中 all_door 或低于阈值0.60，右移视角继续搜索")
+                self.mouse_move(8, axis="x")
+                moves_this_round += 1
+                log.info(
+                    f"[对门] 未命中 all_door 或低于阈值0.60，右移视角继续搜索 (本轮移动数: {moves_this_round})"
+                )
                 time.sleep(0.5)
+
+                # 左右移动超过10次后，执行垂直移动，完成一轮
+                if moves_this_round > 10:
+                    self.mouse_move(5, axis="y", fine=1)
+                    round_count += 1
+                    moves_this_round = 0
+                    log.info(f"[对门] 完成第 {round_count} 轮 (左右移动+垂直调整)")
+
+                    # 6轮后认定为找门失败，暂离重进
+                    if round_count >= 6:
+                        self.recover_door_fail_by_temp_leave()
+                        return 0
+
                 continue
 
             door_center_x = match["center_x"]
@@ -1110,12 +1178,26 @@ class DivergentUniverse(UniverseUtils):
             move_angle = int(round(bias / 16.0))
             if move_angle == 0:
                 move_angle = 1 if bias > 0 else -1
-            self.mouse_move(move_angle)
+            self.mouse_move(move_angle, axis="x")
+            moves_this_round += 1
             log.info(
-                f"[对门] 一次转向: conf={match['conf']:.3f}, bias={bias:+.1f}, move={move_angle:+d}"
+                f"[对门] 一次转向: conf={match['conf']:.3f}, bias={bias:+.1f}, move={move_angle:+d} (本轮移动数: {moves_this_round})"
             )
             # 每次转向后等待0.5s，再进行下一次检测。
             time.sleep(0.5)
+
+            # 左右移动超过10次后，执行垂直移动，完成一轮
+            if moves_this_round > 10:
+                self.mouse_move(5, axis="y", fine=1)
+                round_count += 1
+                moves_this_round = 0
+                log.info(f"[对门] 完成第 {round_count} 轮 (左右移动+垂直调整)")
+
+                # 6轮后认定为找门失败，暂离重进
+                if round_count >= 6:
+                    self.recover_door_fail_by_temp_leave()
+                    return 0
+
         return 0
 
     def move_forward_to_door_f(self, timeout=20):
@@ -1171,7 +1253,7 @@ class DivergentUniverse(UniverseUtils):
         zero = bisect.bisect_left(config.angles, 0)
         while abs(self.portal_bias(portal)) > 50:
             angle = bisect.bisect_left(config.angles, self.portal_bias(portal)) - zero
-            self.mouse_move(angle)
+            self.mouse_move(angle, axis="x")
             if abs(self.portal_bias(portal)) < 200:
                 return portal
             time.sleep(0.2)
@@ -1185,12 +1267,17 @@ class DivergentUniverse(UniverseUtils):
         return portal
 
     def forward_until(self, text_list=[], timeout=5, moving=0, chaos=0):
+        log.info(
+            f"[forward_until] text_list: {text_list}, timeout: {timeout}, moving: {moving}, chaos: {chaos}"
+        )
         tm = time.time()
         if not moving:
             keyops.keyDown("w")
         while time.time() - tm < timeout:
             self.get_screen()
-            if self.check_f(check_text=0):
+            check_result = self.check_f(check_text=0)
+            log.info(f"[forward_until] check_f result: {check_result}")
+            if check_result:
                 keyops.keyUp("w")
                 print(text_list)
                 if chaos:
@@ -1289,12 +1376,12 @@ class DivergentUniverse(UniverseUtils):
         time.sleep(0.25)
         keyops.keyUp("w")
 
-        self.mouse_move(10)
+        self.mouse_move(10, axis="x")
         time.sleep(0.5)
         if self.align_to_door(timeout=3):
             return 1
 
-        self.mouse_move(-20)
+        self.mouse_move(-20, axis="x")
         time.sleep(0.5)
 
         keyops.keyDown("w")
@@ -1682,6 +1769,8 @@ class DivergentUniverse(UniverseUtils):
         for area_type in top_two:
             if area_type in candidates:
                 self.click_box(candidates[area_type]["box"])
+                time.sleep(0.2)
+                self.click_img("divergent/confirm.png")
                 return 1
 
         if len(top_two) == 2:
@@ -1722,6 +1811,8 @@ class DivergentUniverse(UniverseUtils):
             for area_type in priority[:2]:
                 if area_type in candidates:
                     self.click_box(candidates[area_type]["box"])
+                    time.sleep(0.2)
+                    self.click_img("divergent/confirm.png")
                     return 1
 
         # 无可重抽次数（或重抽后仍无前二）时，按优先级选可见项并点击“确定”。
@@ -1731,7 +1822,7 @@ class DivergentUniverse(UniverseUtils):
 
         self.click_box(candidates[final_type]["box"])
         time.sleep(0.2)
-        self.click_position([1156, 970])
+        self.click_img("divergent/confirm.png")
         return 1
 
     def find_event_text(self, save=0):
@@ -2013,6 +2104,9 @@ class DivergentUniverse(UniverseUtils):
         )
 
         if area_now in ["事件", "异常"]:
+            log.info(
+                f"[area_now] Detected area: {area_now}, area_state: {self.area_state}"
+            )
             # 异常层：先前进触发 F 的“事件”，事件结束后再找门进入下一层。
             if self.area_state == 0:
                 pyautogui.click()
@@ -2021,13 +2115,23 @@ class DivergentUniverse(UniverseUtils):
 
                 # 先尝试直行触发 F 事件交互。
                 if not self.forward_until(["事件"], timeout=8, moving=0, chaos=1):
-                    # 兜底：若未触发到交互，尝试按事件对齐逻辑再触发一次。
-                    self.align_event("d", click=1)
+                    log.info("[当前区域] forward_until 未能触发交互。")
 
-                time.sleep(0.4)
+                time.sleep(1)
                 self.get_screen()
-                if "事件" in self.merge_text(self.ts.find_with_box([92, 195, 54, 88])):
-                    self.event()
+                self.ts.forward(self.screen)
+                raw_text = self.ts.find_with_box([90, 190, 60, 101])
+                log.info(f"[当前区域] OCR 原始结果: {raw_text}")
+
+                detected_text = self.merge_text(raw_text)
+                log.info(f"[当前区域] 合并后的识别文本: {detected_text}")
+                if "事件" in detected_text:
+                    log.info("[当前区域] 识别到事件，开始处理事件逻辑。")
+                    event_res = self.run_static(action_list=["事件选择"])
+                    if event_res:
+                        log.info(f"[当前区域] 已执行事件动作: {event_res}")
+                    else:
+                        log.warning("[当前区域] 未触发事件动作，继续进入找门流程")
 
                 self.area_state = 1
 

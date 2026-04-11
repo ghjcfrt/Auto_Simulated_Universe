@@ -117,6 +117,7 @@ class UniverseUtils:
         self.scale = window_state["scale"]
         self.real_width = window_state["real_width"]
         self.order = config.order
+        self.hwnd = window_state["hwnd"]
         self.sct = Screen()
 
     def gen_hotkey_img(self, hotkey="e", bg=None):
@@ -205,12 +206,12 @@ class UniverseUtils:
                             lambda: not self.check("use_package", 0.5182, 0.9407), 2
                         )
                         time.sleep(0.3)
-                    self.press("esc")
+                    self.press("esc", 0.2)
             else:
-                self.press("esc")
+                self.press("esc", 0.2)
         if not self.isrun():
             for _ in range(3):
-                self.press("esc")
+                self.press("esc", 0.2)
                 if self.wait_fig(lambda: not self.isrun(), 3):
                     return
 
@@ -420,7 +421,7 @@ class UniverseUtils:
 
     # 从全屏截屏中裁剪得到游戏窗口截屏
     def get_screen(self):
-        self.screen = self.sct.grab(self.x0, self.y0)
+        self.screen = self.sct.grab(self.hwnd)
         return self.screen
 
     # 移动视角，获得小地图中不变的部分（白线、灰块）

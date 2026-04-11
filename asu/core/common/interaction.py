@@ -5,6 +5,8 @@ import numpy as np
 import pyautogui
 import win32api
 
+from asu.core.platform.log import log
+
 
 def _window_origin(ctx) -> tuple[int, int]:
     x0 = getattr(ctx, "x0", None)
@@ -137,3 +139,26 @@ def get_local(ctx, x, y, size, large=True):
         max(0, bx - sy // 2) : min(ctx.xx, bx + sy // 2),
         :,
     ]
+
+
+def save_screenshot(path, region=None, screen=None):
+    """
+    保存屏幕截图到指定路径。
+
+    :param path: 保存截图的文件路径。
+    :param region: 截图区域，格式为 [x1, x2, y1, y2]。
+    :param screen: 可选，提供的屏幕图像（如果为 None，则调用 pyautogui 截图）。
+    """
+    if screen is None:
+        import pyautogui
+
+        screen = pyautogui.screenshot()
+        screen = np.array(screen)
+
+    if region:
+        x1, x2, y1, y2 = region
+        screen = screen[y1:y2, x1:x2]
+
+    if screen is not None and screen.size > 0:
+        cv.imwrite(path, screen)
+        log.debug(f"截图保存到: {path}")

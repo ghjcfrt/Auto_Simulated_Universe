@@ -156,7 +156,7 @@ class SimulatedUniverse(UniverseUtils):
             if res == 0:
                 if time.time() - self.in_battle > 7:
                     if time.time() - self.in_battle > 90 and self.in_battle > 0:
-                        self.press("esc")
+                        self.press("esc", 0.2)
                         time.sleep(1)
                         self.in_battle = time.time() - 84 * fp
                         fp = not fp
@@ -488,7 +488,7 @@ class SimulatedUniverse(UniverseUtils):
                 or self.kl
             ):
                 time.sleep(2.5)
-                self.press("esc")
+                self.press("esc", 0.2)
                 time.sleep(2)
                 self.init_map()
                 self.floor_init = 0
@@ -556,7 +556,7 @@ class SimulatedUniverse(UniverseUtils):
         elif self.check("init", 0.9120, 0.8361):
             if self.end:
                 time.sleep(1)
-                self.press("esc")
+                self.press("esc", 0.2)
                 self._stop = 1
                 log.info("已退出模拟宇宙，自动化结束")
                 return 1
@@ -729,7 +729,7 @@ class SimulatedUniverse(UniverseUtils):
                     self.click((0.2062, 0.2054))
                     time.sleep(0.3)
                     self.get_screen()
-            self.press("esc")
+            self.press("esc", 0.2)
             self.press("w", 2)
             tm = time.time()
             while (
@@ -1086,4 +1086,3 @@ def run():
 
 if __name__ == "__main__":
     run()
-

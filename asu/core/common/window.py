@@ -33,12 +33,10 @@ def wait_game_window_state(
             xx = c_x1 - c_x0
             yy = c_y1 - c_y0
 
-            w_x0, w_y0, w_x1, w_y1 = win32gui.GetWindowRect(hwnd)
-            full = w_x0 == 0 and w_y0 == 0
-            x0 = max(0, w_x1 - xx) + 9 * full
-            y0 = max(0, w_y1 - yy) + 9 * full
-            x1 = w_x1
-            y1 = w_y1
+            full = False
+            x0, y0 = win32gui.ClientToScreen(hwnd, (0, 0))
+            x1 = x0 + xx
+            y1 = y0 + yy
 
             # 高分屏或放缩导致窗口比 1920×1080 更大时，裁到中心区域。
             if (xx == 1920 or yy == 1080) and xx >= 1920 and yy >= 1080:
@@ -53,7 +51,6 @@ def wait_game_window_state(
 
             dc = win32gui.GetWindowDC(hwnd)
             dpi_x = win32print.GetDeviceCaps(dc, win32con.LOGPIXELSX)
-            dpi_y = win32print.GetDeviceCaps(dc, win32con.LOGPIXELSY)
             win32gui.ReleaseDC(hwnd, dc)
             scale_x = dpi_x / 96
 
@@ -76,6 +73,7 @@ def wait_game_window_state(
                 if success_sleep > 0:
                     time.sleep(success_sleep)
                 return {
+                    "hwnd": hwnd,
                     "x0": x0,
                     "y0": y0,
                     "x1": x1,

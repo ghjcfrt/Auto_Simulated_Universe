@@ -112,6 +112,7 @@ class UniverseUtils:
         self.scy = window_state["scy"]
         self.scale = window_state["scale"]
         self.real_width = window_state["real_width"]
+        self.hwnd = window_state["hwnd"]
         self.sct = Screen()
 
     def gen_hotkey_img(self, hotkey="e", bg=None):
@@ -200,12 +201,12 @@ class UniverseUtils:
                             lambda: not self.check("use_package", 0.5182, 0.9407), 2
                         )
                         time.sleep(0.3)
-                    self.press("esc")
+                    self.press("esc", 0.2)
             else:
-                self.press("esc")
+                self.press("esc", 0.2)
         if not self.isrun():
             for _ in range(3):
-                self.press("esc")
+                self.press("esc", 0.2)
                 if self.wait_fig(lambda: not self.isrun(), 3):
                     return
 
@@ -486,30 +487,30 @@ class UniverseUtils:
             if dx is None:
                 for k in [60, 120, 60, 60, 30, -60, -60, -60, -60]:
                     if self.ang_neg:
-                        self.mouse_move(k)
+                        self.mouse_move(k, axis="x")
                         off -= k
                     else:
-                        self.mouse_move(-k)
+                        self.mouse_move(-k, axis="x")
                         off += k
                     time.sleep(0.3)
                     dx = self.get_end_point()
                     if dx is not None:
                         break
                 if dx is None:
-                    self.mouse_move(off * 1.03)
+                    self.mouse_move(off * 1.03, axis="x")
                     time.sleep(0.3)
                     return 0
         if i == 0:
-            self.mouse_move(dx / 3)
+            self.mouse_move(dx / 3, axis="x")
             time.sleep(0.3)
         else:
-            self.mouse_move(dx / 5)
+            self.mouse_move(dx / 5, axis="x")
             time.sleep(0.3)
         if i == 0 and abs(dx / 3) > 30:
             time.sleep(0.3)
             dx = self.get_end_point(1)
             if dx is not None:
-                self.mouse_move(dx / 4)
+                self.mouse_move(dx / 4, axis="x")
                 time.sleep(0.3)
         return 1
 
@@ -549,7 +550,7 @@ class UniverseUtils:
             time.sleep(0.5)
             hwnd = win32gui.GetForegroundWindow()  # 根据当前活动窗口获取句柄
             Text = win32gui.GetWindowText(hwnd)
-        self.screen = self.sct.grab(self.x0, self.y0)
+        self.screen = self.sct.grab(self.hwnd)
         return self.screen
 
     def save_screen(self, save_path=r"D:\debug", name=""):
@@ -700,6 +701,7 @@ class UniverseUtils:
         time.sleep(1)
 
     def check_f(self, is_in=[], check_text=1):
+        log.info(f"[check_f] is_in: {is_in}, check_text: {check_text}")
         h, w = self.screen.shape[:2]
         sx = w / 1920.0
         sy = h / 1080.0
@@ -736,6 +738,7 @@ class UniverseUtils:
 
         result = cv.matchTemplate(local_screen, target, cv.TM_CCORR_NORMED)
         _min_val, max_val, _min_loc, max_loc = cv.minMaxLoc(result)
+        log.info(f"[check_f] max_val: {max_val}, threshold: {threshold}")
         self.tm = max_val
         self.tx = (fx1 + max_loc[0] + target.shape[1] / 2) / self.xx
         self.ty = (fy1 + max_loc[1] + target.shape[0] / 2) / self.yy
@@ -838,7 +841,7 @@ class UniverseUtils:
             if ii == 0:
                 sub = 0
             if not self.stop_move:
-                self.mouse_move(sub)
+                self.mouse_move(sub, axis="x")
                 return sub
             else:
                 return 0
@@ -954,7 +957,7 @@ class UniverseUtils:
                         self.target.remove(j)
                         log.info("removed:" + str(j))
                 return
-            self.mouse_move(sub)
+            self.mouse_move(sub, axis="x")
             self.ang = ang
             ps = [13, 9 + self.quan * 7, 11, 7]
             if self._stop == 0:
@@ -1001,7 +1004,7 @@ class UniverseUtils:
                     sub += 360
                 while sub > 180:
                     sub -= 360
-                self.mouse_move(sub)
+                self.mouse_move(sub, axis="x")
                 self.ang = ang
                 if self.debug:
                     self.big_map[
@@ -1144,21 +1147,25 @@ class UniverseUtils:
         if not self._stop:
             keyops.keyDown("w")
 
-    # 视角转动指定角度
-    def mouse_move(self, x, fine=1):
+    # 视角转动指定角度（默认x轴，支持y轴）
+    def mouse_move(self, x, axis="x", fine=1):
+        axis = str(axis).lower()
+        if axis not in ("x", "y"):
+            raise ValueError("axis 必须为 'x' 或 'y'")
         if x > 30 // fine:
             y = 30 // fine
         elif x < -30 // fine:
             y = -30 // fine
         else:
             y = x
-        dx = int(16.5 * y * self.multi * self.scale)
+        delta = int(16.5 * y * self.multi * self.scale)
+        dx, dy = (delta, 0) if axis == "x" else (0, delta)
         if self._stop == 0 and self.stop_move == 0:
-            win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, dx, 0)  # 进行视角移动
+            win32api.mouse_event(win32con.MOUSEEVENTF_MOVE, dx, dy)  # 进行视角移动
         time.sleep(0.05 * fine)
         if x != y:
             if self._stop == 0:
-                self.mouse_move(x - y, fine)
+                self.mouse_move(x - y, axis=axis, fine=fine)
             else:
                 raise ValueError("正在退出")
 
@@ -1412,7 +1419,7 @@ class UniverseUtils:
         self.ang_neg = self.ang_off < 0
         if self.ang_off:
             time.sleep(0.6)
-            self.mouse_move(-self.ang_off * 1.2)
+            self.mouse_move(-self.ang_off * 1.2, axis="x")
             time.sleep(0.3)
             self.press("w", 0.3)
         if self.mini_state == 1 and self.floor in [4, 8, 11]:

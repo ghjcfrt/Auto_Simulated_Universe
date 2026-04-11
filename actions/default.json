@@ -235,7 +235,7 @@
         "name": "事件选择",
         "trigger":{
             "text": "事件",
-            "box": [92, 195, 54, 88],
+            "box": [90, 190, 60, 101],
             "redundancy": 30
         },
         "actions": ["event"] 

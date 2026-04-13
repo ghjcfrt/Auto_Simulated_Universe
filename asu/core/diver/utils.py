@@ -1,3 +1,4 @@
+import json
 import math
 import random
 import threading
@@ -114,6 +115,8 @@ class UniverseUtils:
         self.real_width = window_state["real_width"]
         self.hwnd = window_state["hwnd"]
         self.sct = Screen()
+        self._check_debug_data_file = None
+        self._check_debug_data = None
 
     def gen_hotkey_img(self, hotkey="e", bg=None):
         hotkey = hotkey.upper()
@@ -281,6 +284,7 @@ class UniverseUtils:
 
     def _save_check_debug_images(
         self,
+        raw_screen,
         local_screen,
         target,
         max_loc,
@@ -288,6 +292,9 @@ class UniverseUtils:
         threshold,
         path,
         debug_tag="check",
+        center=None,
+        mask=None,
+        large=True,
     ):
         debug_dir = Path(logs_path("check_debug"))
         debug_dir.mkdir(parents=True, exist_ok=True)
@@ -298,6 +305,10 @@ class UniverseUtils:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         template_name = Path(path).stem
         prefix = f"{ts}_{self._check_debug_idx:04d}_{debug_tag}_{template_name}"
+
+        raw_file = debug_dir / f"{prefix}_raw.png"
+        if raw_screen is not None:
+            cv.imwrite(str(raw_file), raw_screen)
 
         roi_file = debug_dir / f"{prefix}_roi.png"
         cv.imwrite(str(roi_file), local_screen)
@@ -319,9 +330,79 @@ class UniverseUtils:
         match_file = debug_dir / f"{prefix}_matched.png"
         cv.imwrite(str(match_file), vis)
 
+        data_file = debug_dir / f"{prefix}.json"
+        debug_data = {
+            "debug_tag": debug_tag,
+            "template_name": template_name,
+            "template_path": path,
+            "center": center,
+            "mask": mask,
+            "large": bool(large),
+            "threshold": float(threshold),
+            "max_val": float(max_val),
+            "matched": bool(max_val >= threshold),
+            "max_loc": [int(max_loc[0]), int(max_loc[1])],
+            "raw_shape": None if raw_screen is None else list(raw_screen.shape),
+            "roi_shape": list(local_screen.shape),
+            "target_shape": list(target.shape),
+            "raw_file": None if raw_screen is None else str(raw_file),
+            "roi_file": str(roi_file),
+            "matched_file": str(match_file),
+            "data_file": str(data_file),
+        }
+        with open(data_file, "w", encoding="utf-8") as f:
+            json.dump(debug_data, f, ensure_ascii=False, indent=2)
+        self._check_debug_data_file = str(data_file)
+        self._check_debug_data = debug_data
+
         print(
             f"[check debug] {debug_tag} max_val={max_val:.4f}, threshold={threshold:.4f}, roi={roi_file}"
         )
+
+    def _json_safe_debug_value(self, value):
+        if isinstance(value, dict):
+            return {
+                str(key): self._json_safe_debug_value(item)
+                for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [self._json_safe_debug_value(item) for item in value]
+        if isinstance(value, tuple):
+            return [self._json_safe_debug_value(item) for item in value]
+        if isinstance(value, set):
+            return [
+                self._json_safe_debug_value(item) for item in sorted(value, key=str)
+            ]
+        if isinstance(value, np.ndarray):
+            return value.tolist()
+        if isinstance(value, np.generic):
+            return value.item()
+        if isinstance(value, Path):
+            return str(value)
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return value
+
+    def _update_last_check_debug_json(self, extra_data):
+        data_file = getattr(self, "_check_debug_data_file", None)
+        if not data_file:
+            return False
+        try:
+            with open(data_file, "r", encoding="utf-8") as f:
+                debug_data = json.load(f)
+        except Exception:
+            return False
+        if not isinstance(debug_data, dict) or not isinstance(extra_data, dict):
+            return False
+
+        debug_data.update(self._json_safe_debug_value(extra_data))
+        try:
+            with open(data_file, "w", encoding="utf-8") as f:
+                json.dump(debug_data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            return False
+        self._check_debug_data = debug_data
+        return True
 
     # 判断截图中匹配中心点附近是否存在匹配模板
     # 模板匹配参数：模板路径、中心点、遮罩区域与匹配阈值
@@ -383,7 +464,9 @@ class UniverseUtils:
         result = cv.matchTemplate(local_screen, target, cv.TM_CCORR_NORMED)
         min_val, max_val, min_loc, max_loc = cv.minMaxLoc(result)
         if debug_save:
+            raw_screen = self.screen.copy() if self.screen is not None else None
             self._save_check_debug_images(
+                raw_screen=raw_screen,
                 local_screen=local_screen,
                 target=target,
                 max_loc=max_loc,
@@ -391,6 +474,9 @@ class UniverseUtils:
                 threshold=threshold,
                 path=path,
                 debug_tag=debug_tag or "check",
+                center=(x, y),
+                mask=mask,
+                large=large,
             )
         self.tx = (
             x

@@ -87,6 +87,7 @@ class DivergentUniverse(UniverseUtils):
         self._battle_ui_detection_enabled = True
         self._entered_universe_scene = False
         self._next_debug_last_save = 0.0
+        self._event_followup = ""
 
         self.init_floor()
         self.saved_num = 0
@@ -149,8 +150,7 @@ class DivergentUniverse(UniverseUtils):
             if self._stop:
                 break
 
-            self.get_screen()
-            self.ts.forward(self.screen)
+            self.ts.forward(self.get_screen())
             area_text = self.clean_text(
                 self.ts.ocr_one_row(self.screen, [50, 350, 3, 35]), char=0
             )
@@ -282,11 +282,21 @@ class DivergentUniverse(UniverseUtils):
                     len(text) and trigger["text"] in self.merge_text(text)
                 ):
                     log.info(f"触发 {i['name']}:{trigger['text']}")
-                    for j in i["actions"]:
-                        self.do_action(j)
+                    actions = i["actions"]
+                    log.info(f"run_static: 执行动作数={len(actions)}")
+                    for step_index, action in enumerate(actions, 1):
+                        action_result = self.do_action(action)
+                        log.info(
+                            f"run_static: {i['name']} step {step_index}/{len(actions)} result={action_result}"
+                        )
                     self.action_history.append(i["name"])
                     self.action_history = self.action_history[-10:]
+                    log.info(
+                        f"run_static: 完成 {i['name']}，最近状态={self.action_history[-3:]}"
+                    )
                     return i["name"]
+        if action_list:
+            log.debug(f"run_static: 未命中 {action_list}")
         return ""
 
     def _match_default_trigger_name(self, action_names=None) -> str:
@@ -416,6 +426,7 @@ class DivergentUniverse(UniverseUtils):
         self.bless_solved = 0
         self.fail_cnt = 0
         self.now_event = ""
+        self._event_followup = ""
         if hasattr(self, "keys"):
             self.keys.fff = 0
         for i in ["w", "a", "s", "d", "f"]:
@@ -808,6 +819,7 @@ class DivergentUniverse(UniverseUtils):
     def match_battle_roi(self, threshold=0.9):
         # battle_ui 改为全屏模板匹配，不再裁固定 ROI。
         # 语义约定：matched=True 表示“未入战常驻 battle_ui 可见”。
+        # 语义翻转：battle_ui 可见=未入战，battle_ui 不可见=已入战/战中。
         if self.screen is None:
             log.info("battle_ui检测: skipped(no screen)")
             return False
@@ -914,6 +926,52 @@ class DivergentUniverse(UniverseUtils):
                 return 1
             time.sleep(0.2)
         return 0
+
+    def _probe_event_followup(self, timeout=1.5):
+        bless_like_names = [
+            "祝福选择",
+            "方程选择",
+            "金血选择",
+            "欢愉假面",
+            "愿力满盈",
+        ]
+        item_like_names = [
+            "选择站点卡",
+            "加权奇物选择",
+            "奇物大转盘",
+            "混沌药箱",
+            "丢弃",
+        ]
+        tm = time.time()
+        while time.time() - tm < timeout:
+            if self._stop:
+                return ""
+            self.get_screen()
+            self.ts.forward(self.screen)
+            if self.match_battle_roi(threshold=0.9):
+                log.info("事件页退出探测: 检测到战斗入口界面")
+                return "battle_entry"
+            if self._check_battle_c_btn() or self.check(
+                "auto",
+                1763 / 1920,
+                47 / 1080,
+                debug_save=False,
+                debug_tag="auto_btn",
+                threshold=0.9,
+            ):
+                log.info("事件页退出探测: 检测到战斗中 UI")
+                return "battle_active"
+            followup_name = self._match_default_trigger_name(
+                bless_like_names + item_like_names
+            )
+            if followup_name:
+                if followup_name in bless_like_names:
+                    log.info(f"事件页退出探测: 检测到祝福界面 {followup_name}")
+                    return "bless_ui"
+                log.info(f"事件页退出探测: 检测到奇物/站点卡界面 {followup_name}")
+                return "item_ui"
+            time.sleep(0.12)
+        return ""
 
     # 进场前检测 f 键是否可按（互动点检测）
     def _check_enter_interact_f(self):
@@ -1427,6 +1485,7 @@ class DivergentUniverse(UniverseUtils):
     def event(self):
         event_id = (-1, "")
         self.event_solved = 1
+        self._event_followup = ""
         tm = time.time()
         while time.time() - tm < 20:
             title_text = self.clean_text(
@@ -1441,85 +1500,182 @@ class DivergentUniverse(UniverseUtils):
                 self.now_event = event_id[1]
                 log.info(f"event:{event_id},start:{start}")
             if "事件" not in self.merge_text(self.ts.find_with_box([92, 195, 54, 88])):
+                self._event_followup = self._probe_event_followup()
+                if self._event_followup:
+                    log.info(f"事件处理退出后续状态: {self._event_followup}")
+                else:
+                    log.error(
+                        f"事件处理异常：已离开事件页但未识别到后续界面, event_id={event_id}, now_event={self.now_event}, title={title_text}"
+                    )
                 return
 
-            self.get_screen()
-            if self.check("arrow", 0.1828, 0.5000, mask="mask_event"):
+            self.ts.forward(self.get_screen())
+            if self.check(
+                "arrow",
+                0.8172,
+                0.5000,
+                mask="mask_event",
+                debug_save=self.debug > 0,
+                debug_tag="event_arrow",
+            ):
                 self.click((self.tx, self.ty))
             # 事件界面：退出
-            elif self.check("arrow_1", 0.1828, 0.5000, mask="mask_event"):
+            elif self.check(
+                "arrow_1",
+                0.8172,
+                0.5000,
+                mask="mask_event",
+                debug_save=self.debug > 0,
+                debug_tag="event_exit",
+            ):
                 self.click((self.tx, self.ty))
             # 事件选择界面
-            elif self.check("star", 0.1828, 0.5000, mask="mask_event", threshold=0.965):
+            elif self.check(
+                "star",
+                0.8172,
+                0.5000,
+                mask="mask_event",
+                threshold=0.965,
+                debug_save=self.debug > 0,
+                debug_tag="event_star",
+            ):
+                star_tx, star_ty = self.tx, self.ty
                 if self.debug and event_id[0] == -1:
                     print(self.ts.res)
                     with open("test.txt", "a") as f:
                         format_string = "%H:%M:%S"
                         formatted_time = time.strftime(format_string, time.localtime())
                         f.write(formatted_time + " new event" + "\n")
-                tx, ty = self.tx, self.ty
-                self.ts.forward(self.screen)
+                self.ts.forward(self.get_screen())
                 clicked = 0
-                if event_id[0] != -1:
-                    text = self.ts.find_with_box([1300, 1920, 100, 1080], redundancy=30)
-                    events = []
-                    event_now = None
-                    last_star = 0
-                    for i in text:
-                        if (
-                            self.check_box(
-                                "star", [1250, 1460, i["box"][2] - 30, i["box"][3] + 30]
-                            )
-                            and last_star < self.ty - 20
-                        ):
-                            last_star = self.ty
-                            if event_now is not None:
-                                events.append(event_now)
-                            event_now = {
-                                "raw_text": i["raw_text"].lstrip("米"),
-                                "box": i["box"],
-                            }
+                selected_event = None
+                text = self.ts.find_with_box([1300, 1920, 100, 1080], redundancy=30)
+                raw_texts = []
+                for item in text:
+                    raw_item = dict(item)
+                    raw_item["box"] = list(raw_item["box"])
+                    raw_texts.append(raw_item)
+
+                events = []
+                event_now = None
+                last_star = 0
+                for i in raw_texts:
+                    current_star = self.check_box(
+                        "star", [1250, 1460, i["box"][2] - 30, i["box"][3] + 30]
+                    )
+                    current_star_y = self.ty
+                    if current_star and last_star < current_star_y - 20:
+                        last_star = current_star_y
+                        if event_now is not None:
+                            events.append(event_now)
+                        event_now = {
+                            "raw_text": str(i["raw_text"]).lstrip("米"),
+                            "box": list(i["box"]),
+                            "parts": [i],
+                        }
+                    else:
+                        if event_now is not None:
+                            event_now["raw_text"] += str(i["raw_text"])
+                            event_now["parts"].append(i)
                         else:
-                            if event_now is not None:
-                                event_now["raw_text"] += i["raw_text"]
-                            else:
-                                event_now = {"raw_text": i["raw_text"], "box": i["box"]}
+                            event_now = {
+                                "raw_text": str(i["raw_text"]),
+                                "box": list(i["box"]),
+                                "parts": [i],
+                            }
+                if event_now is not None:
                     events.append(event_now)
+
+                event_rules = self.event_prior.get(event_id[1], ["", "", ""])
+                if event_id[0] != -1:
+                    selection_mode = "score"
                     for e in events:
                         e["raw_text"] = self.clean_text(e["raw_text"], 0)
-                        e["score"] = self.event_score(
-                            e["raw_text"], self.event_prior[event_id[1]]
-                        )
+                        e["score"] = self.event_score(e["raw_text"], event_rules)
                     events = sorted(events, key=lambda x: x["score"], reverse=True)
-                    print(
-                        [
-                            {k: v for k, v in event.items() if k != "box"}
-                            for event in events
-                        ]
-                    )
-                    for i in events:
+                else:
+                    selection_mode = "fallback_bottom"
+                    for e in events:
+                        e["raw_text"] = self.clean_text(e["raw_text"], 0)
+                        e["score"] = 0
+                    events = sorted(events, key=lambda x: x["box"][2], reverse=True)
+                    if len(events):
+                        log.info(f"事件标题未命中，使用最下方选项兜底: {title_text}")
+
+                print(
+                    [{k: v for k, v in event.items() if k != "box"} for event in events]
+                )
+
+                click_targets = events if len(events) else [None]
+                for i in click_targets:
+                    if i is None:
+                        log.warning("事件标题未命中且未分组到选项，点击 star 兜底")
+                        self.click((star_tx, star_ty))
+                        selected_event = {
+                            "raw_text": "",
+                            "box": [star_tx, star_ty, star_tx, star_ty],
+                            "parts": [],
+                            "score": 0,
+                            "fallback": "star_center",
+                        }
+                    else:
                         self.click_box(i["box"])
-                        time.sleep(0.4)
-                        self.get_screen()
-                        if self.check(
-                            "confirm",
-                            0.1828,
-                            0.5000,
-                            mask="mask_event",
-                            threshold=0.965,
-                        ):
-                            self.click((self.tx, self.ty))
-                            clicked = 1
-                            break
-                if not clicked:
-                    self.click((tx, ty))
+                        selected_event = dict(i)
+                        selected_event["box"] = list(selected_event["box"])
                     time.sleep(0.4)
+                    self.get_screen()
                     if self.check(
-                        "confirm", 0.1828, 0.5000, mask="mask_event", threshold=0.965
+                        "confirm",
+                        0.8172,
+                        0.5000,
+                        mask="mask_event",
+                        threshold=0.965,
                     ):
                         self.click((self.tx, self.ty))
+                        clicked = 1
+                        break
+                self._update_last_check_debug_json(
+                    {
+                        "star_ocr": {
+                            "ocr_box": [1300, 1920, 100, 1080],
+                            "redundancy": 30,
+                            "star_match": {
+                                "x": star_tx,
+                                "y": star_ty,
+                                "threshold_y": star_ty - 20,
+                            },
+                            "raw_ocr": raw_texts,
+                            "grouped_events": events,
+                            "selected_event": selected_event,
+                            "clicked": bool(clicked),
+                            "selection_mode": selection_mode,
+                            "event_id": event_id[1],
+                            "title_text": title_text,
+                        }
+                    }
+                )
+                if not clicked:
+                    if event_id[0] == -1:
+                        log.error(
+                            f"事件标题未命中，底部兜底后仍未识别到可确认选项, now_event={self.now_event}, title={title_text}"
+                        )
                     else:
-                        self.click((0.1167, ty - 0.4685 + 0.3546 + 0.02))
+                        log.error(
+                            f"事件选择失败：未识别到可确认选项, event_id={event_id}, now_event={self.now_event}, title={title_text}"
+                        )
+                    self._event_followup = self._probe_event_followup()
+                    if self._event_followup:
+                        log.info(f"事件选择失败后的后续状态: {self._event_followup}")
+                    else:
+                        if event_id[0] == -1:
+                            log.error(
+                                f"事件标题未命中且未识别到后续界面, now_event={self.now_event}"
+                            )
+                        else:
+                            log.error(
+                                f"事件选择失败且未识别到后续界面, event_id={event_id}, now_event={self.now_event}"
+                            )
+                    return
                 time.sleep(0.8)
                 start = 0
             else:
@@ -1529,6 +1685,9 @@ class DivergentUniverse(UniverseUtils):
                     if "事件" not in self.merge_text(
                         self.ts.find_with_box([92, 195, 54, 88])
                     ):
+                        log.error(
+                            f"事件处理被中断：事件页标题消失, event_id={event_id}, now_event={self.now_event}"
+                        )
                         return
                 self.click((0.9479, 0.9565))
                 self.click((0.9479, 0.9565))
@@ -1536,6 +1695,12 @@ class DivergentUniverse(UniverseUtils):
                     self.click((0.9479, 0.9565))
                     self.click((0.9479, 0.9565))
                 self.ts.forward(self.get_screen())
+        log.error(
+            f"事件处理超时：20秒内未完成, event_id={event_id}, now_event={self.now_event}"
+        )
+        self._event_followup = self._probe_event_followup()
+        if self._event_followup:
+            log.info(f"事件超时后的后续状态: {self._event_followup}")
 
     def _get_next_priority(self):
         # 用户优先级来源：程序根目录 info.yml。
@@ -2133,7 +2298,21 @@ class DivergentUniverse(UniverseUtils):
                     else:
                         log.warning("[当前区域] 未触发事件动作，继续进入找门流程")
 
+                    followup = self._event_followup
+                    self._event_followup = ""
+                    if followup == "battle_entry":
+                        log.info("[当前区域] 事件页退出后仍处于战斗入口，先处理战斗")
+                        if not self.handle_battle_area():
+                            self.close_and_exit(click=self.fail_cnt > 1)
+                            self.fail_cnt += 1
+                            return 1
+                    elif followup == "battle_active":
+                        log.info("[当前区域] 事件页退出后已进入战斗，交给外层轮询处理")
+                    elif followup in ["bless_ui", "item_ui"]:
+                        log.info(f"[当前区域] 事件页退出后进入后续界面: {followup}")
+
                 self.area_state = 1
+                return 1
 
             self.portal_opening_days(static=1)
 

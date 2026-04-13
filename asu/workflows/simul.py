@@ -619,13 +619,13 @@ class SimulatedUniverse(UniverseUtils):
         # 事件界面
         elif self.check("event", 0.9479, 0.9565):
             # 事件界面：选择
-            if self.check("arrow", 0.1828, 0.5000, mask="mask_event"):
+            if self.check("arrow", 0.8172, 0.5000, mask="mask_event"):
                 self.click((self.tx, self.ty))
             # 事件界面：退出
-            elif self.check("arrow_1", 0.1828, 0.5000, mask="mask_event"):
+            elif self.check("arrow_1", 0.8172, 0.5000, mask="mask_event"):
                 self.click((self.tx, self.ty))
             # 事件选择界面
-            elif self.check("star", 0.1828, 0.5000, mask="mask_event", threshold=0.965):
+            elif self.check("star", 0.8172, 0.5000, mask="mask_event", threshold=0.965):
                 tx, ty = self.tx, self.ty
                 try:
                     import yaml
@@ -655,7 +655,7 @@ class SimulatedUniverse(UniverseUtils):
                 time.sleep(0.3)
                 self.get_screen()
                 if success and self.check(
-                    "confirm", 0.1828, 0.5000, mask="mask_event", threshold=0.965
+                    "confirm", 0.8172, 0.5000, mask="mask_event", threshold=0.965
                 ):
                     self.click((self.tx, self.ty))
                 else:

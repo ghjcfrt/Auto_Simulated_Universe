@@ -800,7 +800,7 @@ class UniverseUtils:
             return None
 
         local_screen = self.screen[fy1:fy2, fx1:fx2]
-        target_path = self.format_path("f")
+        target_path = img_path("divergent", "f.png")
         target = cv.imread(target_path)
         if target is None:
             log.error(f"模板读取失败: {target_path}")

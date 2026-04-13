@@ -102,7 +102,7 @@ class DivergentUniverse(UniverseUtils):
         set_debug(debug > 0)
 
     def route(self):
-        self.threshold = 0.97
+        self.threshold = 0.91
         self.is_get_team = True  # 启动后重置状态
         while True:
             if self._stop:
@@ -130,7 +130,7 @@ class DivergentUniverse(UniverseUtils):
         log.info("停止运行")
 
     def route_door_test(self):
-        self.threshold = 0.97
+        self.threshold = 0.91
         self.is_get_team = True
         while True:
             if self._stop:
@@ -350,15 +350,25 @@ class DivergentUniverse(UniverseUtils):
             log.warning("[对门] 未识别到“暂离”按钮，继续执行重进流程")
         time.sleep(1.2)
 
-        # 先交互进入入口，再触发“启动”流程。
+        # 先交互进入入口，再尝试点击“开始游戏”。
         self.press("f")
         time.sleep(0.8)
 
-        start_clicked = self.click_img_with_retry(
-            "divergent/start.png", timeout=6.0, threshold=0.88
-        )
+        start_clicked = False
+        for attempt in range(3):
+            self.get_screen()
+            if self.click_img("divergent/start.png", threshold=0.88):
+                start_clicked = True
+                log.info("[对门] 已点击“开始游戏”按钮")
+                break
+            log.warning(
+                f"[对门] 第 {attempt + 1} 次未识别到“开始游戏”按钮，重新尝试 divergent/start.png"
+            )
+            time.sleep(0.5)
+
         if not start_clicked:
-            log.warning("[对门] 未识别到“启动”按钮，尝试直接恢复“继续进度”")
+            log.warning("[对门] 3 次未识别到“开始游戏”按钮，停止直接进入继续进度")
+            return
 
         continue_res = self.run_static_with_retry(action_list=["模式选择"], timeout=6.0)
         if continue_res != "模式选择":
@@ -756,14 +766,10 @@ class DivergentUniverse(UniverseUtils):
         self._auto_battle_probe_start = 0.0
         self._auto_battle_probe_seen_any = False
 
-    def auto_battle(self):
-        if self._auto_battle_stop_recognize:
-            return False
-
-        now = time.time()
-        if self._auto_battle_probe_start <= 0:
-            self._auto_battle_probe_start = now
-
+    def _read_battle_indicators(self):
+        # battle_ui 只表示“未入战的常驻界面”是否可见；c/auto/auto_2 只会在已入战后出现。
+        battle_ui_visible = self.match_battle_roi(threshold=0.9)
+        c_btn = self._check_battle_c_btn()
         auto_btn = self.check(
             "auto",
             1763 / 1920,
@@ -772,18 +778,38 @@ class DivergentUniverse(UniverseUtils):
             debug_tag="auto_btn",
             threshold=0.9,
         )
-        c_btn = self._check_battle_c_btn()
+        auto_2_btn = self.check(
+            "auto_2",
+            0.0583,
+            0.0769,
+            debug_save=False,
+            debug_tag="auto_2_btn",
+        )
+        return battle_ui_visible, c_btn, auto_btn, auto_2_btn
 
-        if auto_btn or c_btn:
+    def auto_battle(self):
+        if self._auto_battle_stop_recognize:
+            return False
+
+        now = time.time()
+        if self._auto_battle_probe_start <= 0:
+            self._auto_battle_probe_start = now
+
+        _, c_btn, auto_btn, auto_2_btn = self._read_battle_indicators()
+
+        # c / auto / auto_2 不是入战条件，但一旦识别到，就说明已经处于战斗中。
+        if auto_btn or auto_2_btn or c_btn:
             self._auto_battle_probe_seen_any = True
         elif (
             not self._auto_battle_probe_seen_any
         ) and now - self._auto_battle_probe_start >= 2.0:
             self._auto_battle_stop_recognize = True
-            log.info("自动战斗检测: 入战后2s内未命中auto/c，停止后续识别并视为已开启")
+            log.info(
+                "自动战斗检测: 入战后2s内未命中auto/auto_2/c，停止后续识别并视为已开启"
+            )
             return False
 
-        if auto_btn and not c_btn:
+        if auto_btn and not c_btn and not auto_2_btn:
             self._auto_battle_c_miss_count += 1
             if (
                 self._auto_battle_c_miss_count in (1, 5)
@@ -795,26 +821,38 @@ class DivergentUniverse(UniverseUtils):
         else:
             self._auto_battle_c_miss_count = 0
 
-        state = (int(auto_btn), int(c_btn))
+        state = (int(auto_btn), int(auto_2_btn), int(c_btn))
         if state != self._auto_battle_last_state:
-            log.info(f"自动战斗检测: auto={state[0]}, c={state[1]}")
+            log.info(
+                f"自动战斗检测: 已入战状态 auto={state[0]}, auto_2={state[1]}, c={state[2]}"
+            )
             self._auto_battle_last_state = state
 
-        if self._auto_battle_wait_post_v and (not auto_btn) and (not c_btn):
+        if (
+            self._auto_battle_wait_post_v
+            and (not auto_btn)
+            and (not auto_2_btn)
+            and (not c_btn)
+        ):
             self._auto_battle_wait_post_v = False
             self._auto_battle_stop_recognize = True
-            log.info("自动战斗检测: v后 auto/c 同时未命中，停止后续识别")
+            log.info("自动战斗检测: v后 auto/auto_2/c 同时未命中，停止后续识别")
             return False
 
         # c 与 auto 同时命中时，等待后发送一次 v。
-        if c_btn and auto_btn and time.time() - self._auto_battle_last_toggle > 1.2:
+        if (
+            c_btn
+            and auto_btn
+            and not auto_2_btn
+            and time.time() - self._auto_battle_last_toggle > 1.2
+        ):
             self._auto_battle_last_toggle = time.time()
             time.sleep(0.5)
             self.press("v")
             self._auto_battle_wait_post_v = True
             log.info("自动战斗检测: c+auto命中，等待0.5s后发送v")
 
-        return auto_btn or c_btn
+        return auto_btn or auto_2_btn or c_btn
 
     def match_battle_roi(self, threshold=0.9):
         # battle_ui 改为全屏模板匹配，不再裁固定 ROI。
@@ -891,8 +929,7 @@ class DivergentUniverse(UniverseUtils):
         while time.time() - tm < timeout:
             if self._stop:
                 return 0
-            self.get_screen()
-            self.ts.forward(self.screen)
+            self.ts.forward(self.get_screen())
 
             area_text = self.clean_text(
                 self.ts.ocr_one_row(self.screen, [50, 350, 3, 35]), char=0
@@ -923,8 +960,7 @@ class DivergentUniverse(UniverseUtils):
             if self._stop:
                 log.info("wait_battle_end: 收到停止信号，退出战斗等待")
                 return 0
-            self.get_screen()
-            self.ts.forward(self.screen)
+            self.ts.forward(self.get_screen())
             if self._stop:
                 log.info("wait_battle_end: 截图后收到停止信号，退出战斗等待")
                 return 0
@@ -940,7 +976,7 @@ class DivergentUniverse(UniverseUtils):
             time.sleep(0.2)
         return 0
 
-    def _probe_event_followup(self, timeout=1.5):
+    def _probe_event_followup(self, retries=12, interval=0.2):
         bless_like_names = [
             "祝福选择",
             "方程选择",
@@ -955,24 +991,21 @@ class DivergentUniverse(UniverseUtils):
             "混沌药箱",
             "丢弃",
         ]
-        tm = time.time()
-        while time.time() - tm < timeout:
+        for attempt in range(retries):
             if self._stop:
                 return ""
-            self.get_screen()
-            self.ts.forward(self.screen)
-            if self.match_battle_roi(threshold=0.9):
+            self.ts.forward(self.get_screen())
+            battle_ui_visible, c_btn, auto_btn, auto_2_btn = (
+                self._read_battle_indicators()
+            )
+            log.info(
+                f"事件页退出探测[{attempt + 1}/{retries}]: battle_ui={int(battle_ui_visible)}, c={int(c_btn)}, auto={int(auto_btn)}, auto_2={int(auto_2_btn)}"
+            )
+            if battle_ui_visible:
                 log.info("事件页退出探测: 检测到战斗入口界面")
                 return "battle_entry"
-            if self._check_battle_c_btn() or self.check(
-                "auto",
-                1763 / 1920,
-                47 / 1080,
-                debug_save=False,
-                debug_tag="auto_btn",
-                threshold=0.9,
-            ):
-                log.info("事件页退出探测: 检测到战斗中 UI")
+            if c_btn or auto_btn or auto_2_btn:
+                log.info("事件页退出探测: 检测到已入战 UI（c/auto/auto_2）")
                 return "battle_active"
             followup_name = self._match_default_trigger_name(
                 bless_like_names + item_like_names
@@ -983,7 +1016,7 @@ class DivergentUniverse(UniverseUtils):
                     return "bless_ui"
                 log.info(f"事件页退出探测: 检测到奇物/站点卡界面 {followup_name}")
                 return "item_ui"
-            time.sleep(0.12)
+            time.sleep(interval)
         return ""
 
     # 进场前检测 f 键是否可按（互动点检测）
@@ -1201,7 +1234,7 @@ class DivergentUniverse(UniverseUtils):
         return 0
 
     # 新差分找门
-    def align_to_door(self, timeout=8):
+    def align_to_door(self, timeout=120):
         tm = time.time()
         round_count = 0  # 轮数计数器
         moves_this_round = 0  # 本轮左右移动计数
@@ -1212,7 +1245,7 @@ class DivergentUniverse(UniverseUtils):
             self.get_screen()
             match = self._match_all_door_fullscreen(self.screen)
             if match is None or match["conf"] < 0.6:
-                self.mouse_move(8, axis="x")
+                self.mouse_move(25, axis="x")
                 moves_this_round += 1
                 log.info(
                     f"[对门] 未命中 all_door 或低于阈值0.60，右移视角继续搜索 (本轮移动数: {moves_this_round})"
@@ -1470,6 +1503,18 @@ class DivergentUniverse(UniverseUtils):
         if deep == 0:
             self.portal_cnt += 1
 
+        self.get_screen()
+        if self.check_f(check_text=0):
+            f_text = self.clean_text(
+                self.ts.ocr_one_row(self.screen, [1207, 1530, 585, 640]), char=0
+            )
+            if "随意门" in f_text:
+                log.info(f"[对门] 检测到“随意门”，直接进入门交互: {f_text}")
+                if self.move_forward_to_door_f():
+                    self.init_floor()
+                    return
+                log.info("[对门] 随意门快捷进入失败，回退常规对门流程")
+
         # 新版差分宇宙：不再依赖地图，采用“处理结束后 -> 门模板对准 -> 直行到F交互”。
         # 注意：战斗处理仅在战斗位面中通过 handle_battle_area 执行。
 
@@ -1485,6 +1530,65 @@ class DivergentUniverse(UniverseUtils):
 
         self.close_and_exit(click=self.fail_count > 1)
         self.fail_count += 1
+
+    def _scan_event_positions(self, timeout=15):
+        tm = time.time()
+        total_events = None
+        keyops.keyDown("w")
+        try:
+            while time.time() - tm < timeout:
+                if self._stop:
+                    return []
+                self.get_screen()
+                if self.check_f(check_text=0):
+                    f_text = self.clean_text(
+                        self.ts.ocr_one_row(self.screen, [1207, 1530, 585, 640]),
+                        char=0,
+                    )
+                    if "随意门" in f_text:
+                        log.info(f"[当前区域] 扫描到随意门，直接进入门交互: {f_text}")
+                        keyops.keyUp("w")
+                        if self.move_forward_to_door_f():
+                            return "door"
+                        log.info("[当前区域] 未识别到随意门，继续事件扫描")
+                        keyops.keyDown("w")
+                if self.get_text_position():
+                    keyops.keyUp("w")
+                    time.sleep(0.5)
+                    self.get_screen()
+                    total_events = self._filter_event_positions(
+                        self.get_text_position(1)
+                    )
+                    if total_events:
+                        return total_events
+                    keyops.keyDown("w")
+                    time.sleep(1)
+                    tm += 1.5
+            return []
+        finally:
+            keyops.keyUp("w")
+
+    def _filter_event_positions(self, positions):
+        # 过滤掉 battle_ui、右侧角色名和其他明显不属于事件标题的坐标。
+        filtered = []
+        for x, y in positions:
+            # 左上ui
+            if x < 460 and y < 180:
+                continue
+            # 右上ui
+            if x > 1470 and y < 115:
+                continue
+            # 配队
+            if x > 1660 and 220 < y < 635:
+                continue
+            # 技能
+            if x > 1560 and y > 800:
+                continue
+            # UID
+            if x < 250 and y > 1030:
+                continue
+            filtered.append((x, y))
+        return filtered
 
     def event_score(self, text, event):
         score = 0
@@ -1548,7 +1652,7 @@ class DivergentUniverse(UniverseUtils):
                 0.8172,
                 0.5000,
                 mask="mask_event",
-                threshold=0.965,
+                threshold=0.9,
                 debug_save=self.debug > 0,
                 debug_tag="event_star",
             ):
@@ -1642,7 +1746,7 @@ class DivergentUniverse(UniverseUtils):
                         0.8172,
                         0.5000,
                         mask="mask_event",
-                        threshold=0.965,
+                        threshold=0.9,
                     ):
                         self.click((self.tx, self.ty))
                         clicked = 1
@@ -2005,18 +2109,17 @@ class DivergentUniverse(UniverseUtils):
 
     def find_event_text(self, save=0):
         self.get_screen()
-        res = self.get_text_position(clean=1)
+        res = self._filter_event_positions(self.get_text_position(clean=1))
         res = sorted(res, key=lambda x: x[0])
         if len(res):
             return res[-1][0]
-        else:
-            return 0
         time.sleep(0.3)
         text = self.ts.find_with_box([300, 1920, 0, 350], forward=1, mode=2)
         res = 0
         event_text = ""
         debug_res = []
         print("event_text:", text)
+        preferred_text = self.event_text or ""
         for i in text:
             box = i["box"]
             if (
@@ -2040,8 +2143,8 @@ class DivergentUniverse(UniverseUtils):
                 continue
             if (
                 (box[0] + box[1]) // 2 > res
-                or self.event_text in i["raw_text"]
-                or i["raw_text"] in self.event_text
+                or (preferred_text and preferred_text in i["raw_text"])
+                or (preferred_text and i["raw_text"] in preferred_text)
             ):
                 res = (box[0] + box[1]) // 2
                 event_text = i["raw_text"]
@@ -2257,7 +2360,7 @@ class DivergentUniverse(UniverseUtils):
                 else:
                     log.info("OCR检测到的队伍成员: 无")
 
-        self.get_screen()
+        self.ts.forward(self.get_screen())
         if self.check("divergent/arrow", 0.7833, 0.9231, threshold=0.95):
             keyops.keyDown("alt")
             time.sleep(0.2)
@@ -2285,31 +2388,49 @@ class DivergentUniverse(UniverseUtils):
             log.info(
                 f"[area_now] Detected area: {area_now}, area_state: {self.area_state}"
             )
-            # 异常层：先前进触发 F 的“事件”，事件结束后再找门进入下一层。
+            # 事件/异常层：先扫描事件数量，再按从右到左逐个处理，最后找门。
             if self.area_state == 0:
                 pyautogui.click()
                 self.check_pop()
                 time.sleep(0.4)
 
-                # 先尝试直行触发 F 事件交互。
-                if not self.forward_until(["事件"], timeout=8, moving=0, chaos=1):
-                    log.info("[当前区域] forward_until 未能触发交互。")
+                while not self._stop:
+                    total_events = self._scan_event_positions()
+                    if total_events == "door":
+                        log.info(
+                            "[当前区域] 已识别随意门并进入门交互流程，结束本轮事件扫描。"
+                        )
+                        return 1
+                    if not total_events:
+                        log.info("[当前区域] 未识别到更多事件，开始找门流程。")
+                        self.area_state = 1
+                        break
 
-                time.sleep(1)
-                self.get_screen()
-                self.ts.forward(self.screen)
-                raw_text = self.ts.find_with_box([90, 190, 60, 101])
-                log.info(f"[当前区域] OCR 原始结果: {raw_text}")
+                    log.info(
+                        f"[当前区域] 识别到 {len(total_events)} 个事件: {total_events}"
+                    )
+                    self.align_event("d", event_text=total_events[-1][0], click=1)
 
-                detected_text = self.merge_text(raw_text)
-                log.info(f"[当前区域] 合并后的识别文本: {detected_text}")
-                if "事件" in detected_text:
-                    log.info("[当前区域] 识别到事件，开始处理事件逻辑。")
-                    event_res = self.run_static(action_list=["事件选择"])
-                    if event_res:
-                        log.info(f"[当前区域] 已执行事件动作: {event_res}")
+                    time.sleep(1)
+                    self.ts.forward(self.get_screen())
+                    raw_text = self.ts.find_with_box([90, 190, 60, 101])
+                    log.info(f"[当前区域] OCR 原始结果: {raw_text}")
+
+                    detected_text = self.merge_text(raw_text)
+                    log.info(f"[当前区域] 合并后的识别文本: {detected_text}")
+
+                    event_res = ""
+                    if "事件" in detected_text:
+                        log.info("[当前区域] 识别到事件，开始处理事件逻辑。")
+                        event_res = self.run_static(action_list=["事件选择"])
+                        if event_res:
+                            log.info(f"[当前区域] 已执行事件动作: {event_res}")
+                        else:
+                            log.warning("[当前区域] 未触发事件动作，直接执行事件处理。")
+                            self.event()
                     else:
-                        log.warning("[当前区域] 未触发事件动作，继续进入找门流程")
+                        log.info("[当前区域] 当前未稳定识别到事件文本，重新扫描。")
+                        continue
 
                     followup = self._event_followup
                     self._event_followup = ""
@@ -2321,10 +2442,15 @@ class DivergentUniverse(UniverseUtils):
                             return 1
                     elif followup == "battle_active":
                         log.info("[当前区域] 事件页退出后已进入战斗，交给外层轮询处理")
+                        return 1
                     elif followup in ["bless_ui", "item_ui"]:
                         log.info(f"[当前区域] 事件页退出后进入后续界面: {followup}")
+                        return 1
 
-                self.area_state = 1
+                    log.info("[当前区域] 事件已处理，继续查找下一个事件。")
+
+                if self.area_state == 1:
+                    self.portal_opening_days(static=1)
                 return 1
 
             self.portal_opening_days(static=1)
@@ -2369,9 +2495,10 @@ class DivergentUniverse(UniverseUtils):
                         keyops.keyUp("w")
                         time.sleep(0.5)
                         self.get_screen()
-                        total_events = self.get_text_position(1)
-                        if len(total_events) and total_events[0][0] < 1600:
-                            # 有时候会锁定到右边的状态效果那个字
+                        total_events = self._filter_event_positions(
+                            self.get_text_position(1)
+                        )
+                        if len(total_events):
                             break
                         else:
                             keyops.keyDown("w")
@@ -2392,7 +2519,9 @@ class DivergentUniverse(UniverseUtils):
                     )
                     time.sleep(0.3)
                     self.get_screen()
-                    total_events_after = self.get_text_position(1)
+                    total_events_after = self._filter_event_positions(
+                        self.get_text_position(1)
+                    )
                     if len(total_events_after) <= 2 and len(total_events_after) >= len(
                         total_events
                     ):

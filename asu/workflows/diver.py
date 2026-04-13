@@ -856,7 +856,20 @@ class DivergentUniverse(UniverseUtils):
         return matched
 
     def battle_end(self):
-        battle_exit_actions = ["祝福选择", "战斗结束-失败"]
+        # 战斗结束后，除了祝福/失败页，还可能先进入方程/奇物等结算页。
+        battle_exit_actions = [
+            "战斗结束-失败",
+            "方程选择",
+            "祝福选择",
+            "金血选择",
+            "欢愉假面",
+            "愿力满盈",
+            "选择站点卡",
+            "加权奇物选择",
+            "奇物大转盘",
+            "混沌药箱",
+            "丢弃",
+        ]
         # 结束判定直接执行 default.json 对应动作，避免“只识别不执行”。
         exit_action = self.run_static(action_list=battle_exit_actions)
         if exit_action:
@@ -1908,7 +1921,7 @@ class DivergentUniverse(UniverseUtils):
                 )
             self.click_box(candidates["首领"]["box"])
             time.sleep(0.2)
-            self.click_position([690, 963])
+            self.click_position([958, 965])
             return 1
 
         visible = self._list_visible_next_by_priority(candidates, priority)

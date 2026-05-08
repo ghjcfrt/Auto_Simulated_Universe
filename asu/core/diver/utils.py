@@ -8,6 +8,7 @@ from copy import deepcopy
 from datetime import datetime
 from math import cos, sin
 from pathlib import Path
+from typing import Literal, overload
 
 import cv2 as cv
 import numpy as np
@@ -49,6 +50,7 @@ from asu.core.common.interaction import (
 from asu.core.common.paths import img_path, logs_path
 from asu.core.common.runtime import notif as runtime_notif
 from asu.core.common.runtime import set_forground as runtime_set_forground
+from asu.core.common.runtime_context import describe_runtime_context
 from asu.core.common.window import wait_game_window_state
 from asu.core.diver.config import config
 from asu.core.platform.log import log, print_exc
@@ -118,11 +120,14 @@ class UniverseUtils:
         self._check_debug_data_file = None
         self._check_debug_data = None
 
-    def gen_hotkey_img(self, hotkey="e", bg=None):
+    def gen_hotkey_img(self, hotkey="e", bg=None, size=None):
         hotkey = hotkey.upper()
         if bg is None:
-            bg = img_path("f_bg.jpg")
-        image = Image.open(bg)
+            if size is None:
+                size = (40, 40)
+            image = Image.new("RGB", size, (0, 0, 0))
+        else:
+            image = Image.open(bg)
         font = ImageFont.truetype(img_path("base.ttf"), 24)
         d = ImageDraw.Draw(image)
         position = (2, -3)
@@ -130,9 +135,11 @@ class UniverseUtils:
         d.text(position, hotkey, font=font, fill=color)
         return np.array(image)
 
-    def press(self, c, t=0):
+    def press(self, c, t: float = 0.0):
         if c not in "3r":
             log.debug(f"按下按钮 {c}，等待 {t} 秒后释放")
+        if str(c).lower() == "esc":
+            log.info(describe_runtime_context("UniverseUtils.press(esc)"))
         if c == "e" and self.allow_e == 0:
             return
         if self.slow and c == "shift":
@@ -359,6 +366,79 @@ class UniverseUtils:
             f"[check debug] {debug_tag} max_val={max_val:.4f}, threshold={threshold:.4f}, roi={roi_file}"
         )
 
+    def _save_check_f_text_debug_images(
+        self,
+        raw_screen,
+        roi_box,
+        roi_screen,
+        ocr_text,
+        keywords,
+        matched,
+        debug_tag="check_f_text",
+        save_dir_name="check_debug",
+        extra_data=None,
+    ):
+        debug_dir = Path(logs_path(save_dir_name))
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        idx_attr = f"_{save_dir_name}_idx"
+        if not hasattr(self, idx_attr):
+            setattr(self, idx_attr, 0)
+        setattr(self, idx_attr, getattr(self, idx_attr) + 1)
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        prefix = f"{ts}_{getattr(self, idx_attr):04d}_{debug_tag}"
+
+        raw_file = debug_dir / f"{prefix}_raw.png"
+        if raw_screen is not None:
+            cv.imwrite(str(raw_file), raw_screen)
+
+        roi_file = debug_dir / f"{prefix}_roi.png"
+        cv.imwrite(str(roi_file), roi_screen)
+
+        marked_file = debug_dir / f"{prefix}_marked.png"
+        marked = None if raw_screen is None else raw_screen.copy()
+        if marked is not None:
+            x1, x2, y1, y2 = [int(v) for v in roi_box]
+            cv.rectangle(marked, (x1, y1), (x2, y2), (0, 220, 255), 2)
+            preview = str(ocr_text or "")[:40].replace("\n", " ")
+            label = f"ocr={preview} hit={int(bool(matched))}"
+            cv.putText(
+                marked,
+                label,
+                (x1, max(20, y1 - 6)),
+                cv.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 220, 255),
+                1,
+                cv.LINE_AA,
+            )
+            cv.imwrite(str(marked_file), marked)
+
+        data_file = debug_dir / f"{prefix}.json"
+        debug_data = {
+            "debug_tag": debug_tag,
+            "ocr_box": [int(v) for v in roi_box],
+            "keywords": list(keywords),
+            "matched": bool(matched),
+            "ocr_text": str(ocr_text or ""),
+            "raw_shape": None if raw_screen is None else list(raw_screen.shape),
+            "roi_shape": list(roi_screen.shape),
+            "raw_file": None if raw_screen is None else str(raw_file),
+            "roi_file": str(roi_file),
+            "marked_file": str(marked_file) if marked is not None else None,
+            "data_file": str(data_file),
+        }
+        if extra_data:
+            debug_data.update(extra_data)
+        with open(data_file, "w", encoding="utf-8") as f:
+            json.dump(debug_data, f, ensure_ascii=False, indent=2)
+        self._check_debug_data_file = str(data_file)
+        self._check_debug_data = debug_data
+
+        log.info(
+            f"[check_f] 文案截图已保存: tag={debug_tag}, raw={raw_file if raw_screen is not None else 'n/a'}, roi={roi_file}"
+        )
+
     def _json_safe_debug_value(self, value):
         if isinstance(value, dict):
             return {
@@ -406,6 +486,7 @@ class UniverseUtils:
 
     # 判断截图中匹配中心点附近是否存在匹配模板
     # 模板匹配参数：模板路径、中心点、遮罩区域与匹配阈值
+    @overload
     def check(
         self,
         path,
@@ -416,16 +497,46 @@ class UniverseUtils:
         large=True,
         debug_save=False,
         debug_tag=None,
+        return_score: Literal[False] = False,
+    ) -> bool: ...
+
+    @overload
+    def check(
+        self,
+        path,
+        x,
+        y,
+        mask=None,
+        threshold=None,
+        large=True,
+        debug_save=False,
+        debug_tag=None,
+        return_score: Literal[True] = True,
+    ) -> tuple[bool, float | None]: ...
+
+    def check(
+        self,
+        path,
+        x,
+        y,
+        mask=None,
+        threshold=None,
+        large=True,
+        debug_save=False,
+        debug_tag=None,
+        return_score=False,
     ):
         if threshold is None:
-            threshold = self.threshold
+            threshold = getattr(self, "threshold", 0.9)
         path = self.format_path(path)
         target = cv.imread(path)
         if target is None:
             log.error(f"模板读取失败: {path}")
-            return False
+            return (False, None) if return_score else False
         if path == img_path("f.jpg") and config.mapping[0] != "f":
-            target = self.gen_hotkey_img(config.mapping[0])
+            target = self.gen_hotkey_img(
+                config.mapping[0], size=(target.shape[1], target.shape[0])
+            )
             threshold -= 0.01
         # 某些窗口状态下缩放系数可能短暂异常，至少保证 resize 尺寸为 1。
         target_w = max(1, int(round(self.scx * target.shape[1])))
@@ -446,7 +557,7 @@ class UniverseUtils:
                 int(self.scx * mask_img.shape[1]),
             )
         local_screen = self.get_local(x, y, shape, large)
-        if large == False:
+        if not large:
             return local_screen
         if (
             local_screen is None
@@ -460,7 +571,7 @@ class UniverseUtils:
                 target.shape,
                 path,
             )
-            return False
+            return (False, None) if return_score else False
         result = cv.matchTemplate(local_screen, target, cv.TM_CCORR_NORMED)
         min_val, max_val, min_loc, max_loc = cv.minMaxLoc(result)
         if debug_save:
@@ -501,7 +612,10 @@ class UniverseUtils:
                     "匹配到图片(重复) %s 相似度 %f 阈值 %f" % (path, max_val, threshold)
                 )
             self.last_info = path
-        return max_val >= threshold
+        matched = max_val >= threshold
+        if return_score:
+            return matched, max_val
+        return matched
 
     def click_img(self, path, threshold=0.95):
         path = self.format_path(path)
@@ -786,8 +900,16 @@ class UniverseUtils:
         self.press("m", 0.2)
         time.sleep(1)
 
-    def check_f(self, is_in=[], check_text=1):
-        log.info(f"[check_f] is_in: {is_in}, check_text: {check_text}")
+    def check_f(
+        self, is_in=None, check_text=1, debug_save=False, debug_tag=None, ocr_box=None
+    ):
+        if is_in is None:
+            keywords = []
+        elif isinstance(is_in, str):
+            keywords = [is_in]
+        else:
+            keywords = list(is_in)
+        debug_save = bool(debug_save)
         h, w = self.screen.shape[:2]
         sx = w / 1920.0
         sy = h / 1080.0
@@ -806,9 +928,21 @@ class UniverseUtils:
             log.error(f"模板读取失败: {target_path}")
             return None
 
-        threshold = 0.95
+        if ocr_box is None:
+            ocr_box = [1202, 1568, 583, 642]
+        else:
+            ocr_box = [int(v) for v in ocr_box]
+
+        template_mode = "模板+OCR" if check_text else "模板"
+        log.info(
+            f"[check_f] 开始{template_mode}检查: 模板ROI=({fx1},{fx2},{fy1},{fy2}), 文案ROI={tuple(ocr_box) if check_text else '关闭'}, 关键词={keywords}"
+        )
+
+        threshold = 0.9
         if config.mapping[0] != "f":
-            target = self.gen_hotkey_img(config.mapping[0])
+            target = self.gen_hotkey_img(
+                config.mapping[0], size=(target.shape[1], target.shape[0])
+            )
             threshold -= 0.01
 
         target_w = max(1, int(round(self.scx * target.shape[1])))
@@ -824,12 +958,32 @@ class UniverseUtils:
 
         result = cv.matchTemplate(local_screen, target, cv.TM_CCORR_NORMED)
         _min_val, max_val, _min_loc, max_loc = cv.minMaxLoc(result)
-        log.info(f"[check_f] max_val: {max_val}, threshold: {threshold}")
         self.tm = max_val
         self.tx = (fx1 + max_loc[0] + target.shape[1] / 2) / self.xx
         self.ty = (fy1 + max_loc[1] + target.shape[0] / 2) / self.yy
 
-        if max_val < threshold:
+        template_matched = max_val >= threshold
+        log.info(
+            f"[check_f] 模板匹配: 模板={Path(target_path).name}, 目标尺寸={target.shape[1]}x{target.shape[0]}, ROI尺寸={local_screen.shape[1]}x{local_screen.shape[0]}, score={max_val:.4f}, threshold={threshold:.4f}, matched={int(template_matched)}"
+        )
+
+        if debug_save:
+            raw_screen = self.screen.copy() if self.screen is not None else None
+            self._save_check_debug_images(
+                raw_screen=raw_screen,
+                local_screen=local_screen,
+                target=target,
+                max_loc=max_loc,
+                max_val=max_val,
+                threshold=threshold,
+                path=target_path,
+                debug_tag=debug_tag or "check_f_template",
+                center=((fx1 + fx2) / 2, (fy1 + fy2) / 2),
+                mask=None,
+                large=True,
+            )
+
+        if not template_matched:
             return None
 
         if self.last_info != target_path:
@@ -841,13 +995,26 @@ class UniverseUtils:
         if not check_text:
             return 1
 
-        text = self.ts.ocr_one_row(self.screen, [1207, 1530, 585, 640])
-        print(text)
-        if len(text):
-            log.info("识别到交互信息：" + text)
-            for i in is_in:
-                if i in text:
-                    return 1
+        text = str(self.ts.ocr_one_row(self.screen, ocr_box) or "")
+        cleaned_text = self.clean_text(text, char=0)
+        keyword_hit = any(keyword in cleaned_text for keyword in keywords)
+        log.info(
+            f"[check_f] 文案OCR: ROI={tuple(ocr_box)}, 原文={text!r}, 清洗后={cleaned_text!r}, 关键词={keywords}, 命中={int(keyword_hit)}"
+        )
+        if debug_save:
+            raw_screen = self.screen.copy() if self.screen is not None else None
+            roi_screen = self.screen[ocr_box[2] : ocr_box[3], ocr_box[0] : ocr_box[1]]
+            self._save_check_f_text_debug_images(
+                raw_screen=raw_screen,
+                roi_box=ocr_box,
+                roi_screen=roi_screen,
+                ocr_text=cleaned_text,
+                keywords=keywords,
+                matched=keyword_hit,
+                debug_tag=debug_tag or "check_f_text",
+            )
+        if keyword_hit:
+            return 1
         return 0
 
     def get_tar(self):
@@ -1812,6 +1979,7 @@ class UniverseUtils:
             if not self.check("choose_bless", 0.9266, 0.9491, threshold=0.945):
                 return
 
+    #
     def get_text_position(self, clean=0):
         if self.event_mask is None:
             self.event_mask = (

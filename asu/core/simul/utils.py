@@ -120,11 +120,14 @@ class UniverseUtils:
         self.hwnd = window_state["hwnd"]
         self.sct = Screen()
 
-    def gen_hotkey_img(self, hotkey="e", bg=None):
+    def gen_hotkey_img(self, hotkey="e", bg=None, size=None):
         hotkey = hotkey.upper()
         if bg is None:
-            bg = img_path("f_bg.jpg")
-        image = Image.open(bg)
+            if size is None:
+                size = (40, 40)
+            image = Image.new("RGB", size, (0, 0, 0))
+        else:
+            image = Image.open(bg)
         font = ImageFont.truetype(img_path("base.ttf"), 24)
         d = ImageDraw.Draw(image)
         position = (2, -3)
@@ -132,7 +135,7 @@ class UniverseUtils:
         d.text(position, hotkey, font=font, fill=color)
         return np.array(image)
 
-    def press(self, c, t=0):
+    def press(self, c, t: float = 0.0):
         if c not in "3r":
             log.debug(f"按下按钮 {c}，等待 {t} 秒后释放")
         if c == "e" and self.allow_e == 0:
@@ -280,7 +283,9 @@ class UniverseUtils:
         path = self.format_path(path)
         target = cv.imread(path)
         if path == img_path("f.jpg") and config.mapping[0] != "f":
-            target = self.gen_hotkey_img(config.mapping[0])
+            target = self.gen_hotkey_img(
+                config.mapping[0], size=(target.shape[1], target.shape[0])
+            )
             threshold -= 0.01
         target = cv.resize(
             target,

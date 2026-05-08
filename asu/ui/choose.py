@@ -13,6 +13,8 @@ from asu.core.diver.args import get_args
 
 args = get_args()
 from asu.core.diver.config import config as config_diver
+from asu.core.common.runtime_context import describe_runtime_context
+from asu.core.platform.log import log
 from asu.core.platform.log import my_print as print
 from asu.core.platform.log import print_exc
 from asu.core.simul.config import config as config_simul
@@ -34,8 +36,13 @@ def choose_view(page: Page):
 
     def run(func, *args, **kwargs):
         try:
+            func_name = getattr(
+                func, "__qualname__", getattr(func, "__name__", str(func))
+            )
+            log.info(describe_runtime_context(f"GUI run enter {func_name}"))
             change_all_button()
             res = func(*args, **kwargs)
+            log.info(describe_runtime_context(f"GUI run exit {func_name}"))
             change_all_button(False)
             return res
         except Exception:

@@ -59,9 +59,11 @@ def install_platform_stubs() -> None:
 
     if "pyautogui" not in sys.modules:
         pyautogui = types.ModuleType("pyautogui")
-        pyautogui.click = lambda *_args, **_kwargs: None
-        pyautogui.drag = lambda *_args, **_kwargs: None
-        pyautogui.screenshot = lambda: None
+        setattr(pyautogui, "click", lambda *_args, **_kwargs: None)
+        setattr(pyautogui, "drag", lambda *_args, **_kwargs: None)
+        setattr(pyautogui, "keyDown", lambda *_args, **_kwargs: None)
+        setattr(pyautogui, "keyUp", lambda *_args, **_kwargs: None)
+        setattr(pyautogui, "screenshot", lambda: None)
         _register("pyautogui", pyautogui)
 
     if "cv2" not in sys.modules:

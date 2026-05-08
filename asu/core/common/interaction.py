@@ -45,6 +45,9 @@ def click_box(ctx, box):
     """点击文字识别框中心点。"""
     x = (box[0] + box[1]) / 2
     y = (box[2] + box[3]) / 2
+    # OCR 框偶尔会贴近窗口边缘；先钳制到客户端内部，避免误点到窗口外导致失焦。
+    x = max(1, min(ctx.xx - 2, x))
+    y = max(1, min(ctx.yy - 2, y))
     click(ctx, (x / ctx.xx, y / ctx.yy))
 
 

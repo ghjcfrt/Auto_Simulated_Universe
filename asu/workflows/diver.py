@@ -4,6 +4,7 @@ import datetime
 import json
 import os
 import re
+import threading
 import time
 import traceback
 from collections import defaultdict
@@ -41,6 +42,7 @@ class DivergentUniverse(UniverseUtils):
         self.is_get_team = True  # 首次进入差分宇宙后,获取队伍成员
         self.team_detect = {}  # 队伍成员检测
 
+        self._stop_lock = threading.Lock()
         self._stop = True
         self.end = 0
         self.floor = 0
@@ -89,6 +91,15 @@ class DivergentUniverse(UniverseUtils):
         self._entered_universe_scene = False
         self._next_debug_last_save = 0.0
         self._event_followup = ""
+        self.area_raw_text = ""
+        self.area_floor = None
+        self.area_floor_source = ""
+        self.floor_total = 13
+        self._last_area_floor_log = None
+        self._area_event_count = 0
+        self._area_event_layout = ""
+        self._area_event_front_x = None
+        self._area_event_back_right_x = None
 
         self.init_floor()
         self.saved_num = 0
@@ -152,14 +163,13 @@ class DivergentUniverse(UniverseUtils):
                 break
 
             self.ts.forward(self.get_screen())
-            area_text = self.clean_text(
-                self.ts.ocr_one_row(self.screen, [50, 350, 3, 35]), char=0
-            )
+            _, area_text = self._read_area_header_text()
             if not ("位面" in area_text or "区域" in area_text or "第" in area_text):
                 time.sleep(0.3)
                 continue
 
             self._entered_universe_scene = True
+            self._enable_view_movement("door_test_detect_universe_scene")
             aligned = self.align_to_door(timeout=6)
             if not aligned:
                 aligned = self.recover_after_align_fail()
@@ -185,11 +195,10 @@ class DivergentUniverse(UniverseUtils):
         self.ts.forward(self.get_screen())
         res = self.run_static()
         if res == "":
-            area_text = self.clean_text(
-                self.ts.ocr_one_row(self.screen, [50, 350, 3, 35]), char=0
-            )
+            _, area_text = self._read_area_header_text()
             if "位面" in area_text or "区域" in area_text or "第" in area_text:
                 self._entered_universe_scene = True
+                self._enable_view_movement("loop_detect_universe_scene")
                 self.area()
                 self.last_action_time = time.time()
 
@@ -300,6 +309,20 @@ class DivergentUniverse(UniverseUtils):
             log.debug(f"run_static: 未命中 {action_list}")
         return ""
 
+    def _run_event_post_static(self) -> str:
+        # 事件页退出后不能直接触发“差分宇宙中”，否则会在外层更新 area_state 前重入 area()。
+        action_list = [
+            action_name
+            for action_name in self.default_json.keys()
+            if action_name != "差分宇宙中"
+        ]
+        post_action = self.run_static(action_list=action_list)
+        if not post_action and self._match_default_trigger_name(["差分宇宙中"]):
+            log.info(
+                "事件处理退出后检测到位面文本，跳过差分宇宙中默认动作，等待区域流程接管。"
+            )
+        return post_action
+
     def _match_default_trigger_name(self, action_names=None) -> str:
         # 仅检测 default.json 的触发条件，不执行动作。
         if action_names is None:
@@ -374,6 +397,7 @@ class DivergentUniverse(UniverseUtils):
         continue_res = self.run_static_with_retry(action_list=["模式选择"], timeout=6.0)
         if continue_res != "模式选择":
             log.warning("[对门] 未识别到“继续进度”按钮")
+        self._enable_view_movement("recover_door_fail_by_temp_leave")
 
     def select_difficulty(self):
         time.sleep(0.5)
@@ -430,6 +454,87 @@ class DivergentUniverse(UniverseUtils):
             "".join([i["raw_text"] for i in self.ts.sort_text(text)]), char
         )
 
+    def _area_header_roi(self):
+        return [50, 525, 3, 45]
+
+    def _normalize_area_header_ocr(self, text):
+        replacements = {
+            "（": "(",
+            "）": ")",
+            "【": "(",
+            "】": ")",
+            "／": "/",
+            "∕": "/",
+            "｜": "/",
+            "|": "/",
+            "\\": "/",
+            "I": "1",
+            "l": "1",
+            "O": "0",
+            "o": "0",
+            "S": "5",
+            "s": "5",
+            "B": "8",
+        }
+        return "".join(replacements.get(ch, ch) for ch in str(text or ""))
+
+    def _parse_floor_from_area_text(self, raw_text, cleaned_text=None):
+        normalized = self._normalize_area_header_ocr(raw_text)
+        ratio_match = re.search(r"(?<!\d)(\d{1,2})\s*/\s*(\d{1,2})(?!\d)", normalized)
+        if ratio_match:
+            floor = int(ratio_match.group(1))
+            total = int(ratio_match.group(2))
+            if 1 <= floor <= total <= 20:
+                return floor, total, "ratio"
+
+        candidates = [self.clean_text(normalized, char=0)]
+        if cleaned_text and cleaned_text not in candidates:
+            candidates.append(cleaned_text)
+
+        known_totals = []
+        for total in [getattr(self, "floor_total", None), 13]:
+            if isinstance(total, int) and total not in known_totals:
+                known_totals.append(total)
+
+        for text in candidates:
+            prefix_match = re.search(r"(\d{2,4})(?=第|位面|区域)", text)
+            if not prefix_match:
+                prefix_match = re.match(r"(\d{2,4})", text)
+            if not prefix_match:
+                continue
+
+            digits = prefix_match.group(1)
+            for total in known_totals:
+                total_text = str(total)
+                if not digits.endswith(total_text) or len(digits) <= len(total_text):
+                    continue
+                floor_text = digits[: -len(total_text)]
+                floor = int(floor_text)
+                if 1 <= floor <= total <= 20:
+                    return floor, total, "compact"
+
+            if len(digits) >= 3:
+                floor = int(digits[:-2])
+                total = int(digits[-2:])
+                if 1 <= floor <= total <= 20:
+                    return floor, total, "compact"
+
+        return None, None, ""
+
+    def _read_area_header_text(self):
+        self.area_raw_text = (
+            self.ts.ocr_one_row(self.screen, self._area_header_roi()) or ""
+        )
+        self.area_text = self.clean_text(self.area_raw_text, char=0)
+        floor, total, source = self._parse_floor_from_area_text(
+            self.area_raw_text, self.area_text
+        )
+        self.area_floor = floor
+        self.area_floor_source = source
+        if total is not None:
+            self.floor_total = total
+        return self.area_raw_text, self.area_text
+
     def init_floor(self):
         self.portal_cnt = 0
         self.area_state = 0
@@ -438,10 +543,20 @@ class DivergentUniverse(UniverseUtils):
         self.fail_cnt = 0
         self.now_event = ""
         self._event_followup = ""
+        self._area_event_count = 0
+        self._area_event_layout = ""
+        self._area_event_front_x = None
+        self._area_event_back_right_x = None
         if hasattr(self, "keys"):
             self.keys.fff = 0
-        for i in ["w", "a", "s", "d", "f"]:
-            keyops.keyUp(i)
+        self._release_control_keys(["w", "a", "s", "d", "f"], "init_floor")
+
+    def _release_control_keys(self, keys=None, label="release_control_keys"):
+        for key in keys or ["shift", "alt", "w", "a", "s", "d", "f"]:
+            try:
+                keyops.keyUp(key, pause=False)
+            except Exception as exc:
+                log.debug(f"{label}: 释放按键 {key} 失败: {exc}")
 
     def save_or_exit(self):
         print("saved_num:", self.saved_num, "save_cnt:", config.save_cnt)
@@ -472,11 +587,12 @@ class DivergentUniverse(UniverseUtils):
                 self.keys.events.clear()
             except Exception:
                 pass
-        for key in ["shift", "alt", "w", "a", "s", "d", "f"]:
-            try:
-                keyops.keyUp(key)
-            except Exception as exc:
-                log.debug(f"close_and_exit: 释放按键 {key} 失败: {exc}")
+        self._release_control_keys(label="close_and_exit")
+
+    def _enable_view_movement(self, label="enable_view_movement"):
+        if getattr(self, "stop_move", 0):
+            log.info(f"{label}: 恢复视角移动输入 stop_move=1 -> 0")
+        self.stop_move = 0
 
     def close_and_exit(self, click=True):
         log.info(describe_runtime_context(f"close_and_exit(click={click})"))
@@ -494,7 +610,9 @@ class DivergentUniverse(UniverseUtils):
                 click = True
                 self.fail_tm = 0
                 if self.debug:
-                    exit()
+                    log.info("debug模式下连续暂离失败，标记停止运行，跳过 exit()")
+                    self._stop = True
+                    return
             else:
                 self.fail_tm = time.time()
         if click:
@@ -635,10 +753,20 @@ class DivergentUniverse(UniverseUtils):
 
     def get_now_area(self, deep=0):
         team_member, team_detect_detail = self.find_team_member(return_details=True)
-        self.area_text = self.clean_text(
-            self.ts.ocr_one_row(self.screen, [54, 311, 16, 42]), char=0
-        )
+        self._read_area_header_text()
         print("area_text:", self.area_text, "deep:", deep)
+        if self.area_floor is not None:
+            floor_log_key = (
+                self.area_floor,
+                self.floor_total,
+                self.area_floor_source,
+                self.area_text,
+            )
+            if floor_log_key != getattr(self, "_last_area_floor_log", None):
+                log.info(
+                    f"层数OCR解析: floor={self.area_floor}/{self.floor_total}, source={self.area_floor_source}, raw='{self.area_raw_text}', clean='{self.area_text}'"
+                )
+                self._last_area_floor_log = floor_log_key
         if (
             "位面" in self.area_text
             or "区域" in self.area_text
@@ -948,7 +1076,7 @@ class DivergentUniverse(UniverseUtils):
 
         return ""
 
-    def _resolve_post_battle_settlement(self, timeout=35):
+    def _resolve_post_battle_settlement(self, timeout=None):
         tm = time.time()
         settle_actions = [
             "方程选择",
@@ -967,7 +1095,7 @@ class DivergentUniverse(UniverseUtils):
             "混沌药箱",
             "丢弃",
         ]
-        while time.time() - tm < timeout:
+        while timeout is None or time.time() - tm < timeout:
             if self._stop:
                 return 0
             self.ts.forward(self.get_screen())
@@ -988,7 +1116,7 @@ class DivergentUniverse(UniverseUtils):
         log.warning("战斗结算检测: 超时未回到位面界面")
         return 0
 
-    def wait_battle_end(self, timeout=120, confirmed_in_battle=False):
+    def wait_battle_end(self, timeout=None, confirmed_in_battle=False):
         if not confirmed_in_battle:
             log.warning("wait_battle_end 跳过：未确认已入战")
             return 0
@@ -996,8 +1124,9 @@ class DivergentUniverse(UniverseUtils):
             self._overworld_ui_detection_enabled = False
             log.info("大世界界面检测: 已确认入战，暂停检测")
         tm = time.time()
+        last_wait_log = tm
         battle_wait_actions = ["继续战斗", "确认界面", "点击空白处关闭", "过量转化"]
-        while time.time() - tm < timeout:
+        while timeout is None or time.time() - tm < timeout:
             if self._stop:
                 log.info("wait_battle_end: 收到停止信号，退出战斗等待")
                 return 0
@@ -1014,11 +1143,44 @@ class DivergentUniverse(UniverseUtils):
                 return 0
             if ended_action:
                 return 1
+            now = time.time()
+            if timeout is None and now - last_wait_log >= 30:
+                log.info("wait_battle_end: 仍在等待战斗结束")
+                last_wait_log = now
             time.sleep(0.2)
         return 0
 
+    def _save_event_exit_probe_snapshot(
+        self, reason, attempt, retries, indicators=None, followup_name=""
+    ):
+        screen = self.screen
+        if screen is None or getattr(screen, "size", 0) == 0:
+            log.warning("事件页退出探测调试截图跳过: 当前截图为空")
+            return ""
+
+        save_dir = logs_path("event_exit_probe_debug")
+        os.makedirs(save_dir, exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        prefix = f"{ts}_attempt_{attempt:02d}_of_{retries:02d}_{reason}"
+        raw_path = os.path.join(save_dir, f"{prefix}_raw.png")
+        json_path = os.path.join(save_dir, f"{prefix}.json")
+
+        cv.imwrite(raw_path, screen)
+        debug_data = {
+            "reason": reason,
+            "attempt": int(attempt),
+            "retries": int(retries),
+            "indicators": indicators or {},
+            "followup_name": followup_name,
+            "raw_path": raw_path,
+        }
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(debug_data, f, ensure_ascii=False, indent=2)
+        log.warning(f"事件页退出探测调试截图已保存: raw={raw_path}, meta={json_path}")
+        return raw_path
+
     # 战斗结束后，可能直接回到位面，也可能先进入结算界面（祝福/方程/奇物等）。这个函数负责探测结算界面并做出区分。
-    def _probe_event_followup(self, retries=12, interval=0.2):
+    def _probe_event_followup(self, retries=30, interval=0.2):
         bless_like_names = [
             "祝福选择",
             "方程选择",
@@ -1034,7 +1196,6 @@ class DivergentUniverse(UniverseUtils):
             "丢弃",
         ]
         self.click((0.5, 0.5))
-        time.sleep(0.25)
         for attempt in range(retries):
             if self._stop:
                 return ""
@@ -1042,14 +1203,32 @@ class DivergentUniverse(UniverseUtils):
             overworld_ui_visible, c_btn, auto_btn, auto_2_btn = (
                 self._read_battle_indicators()
             )
+            indicators = {
+                "overworld_ui": int(overworld_ui_visible),
+                "c": int(c_btn),
+                "auto": int(auto_btn),
+                "auto_2": int(auto_2_btn),
+            }
             log.info(
                 f"事件页退出探测[{attempt + 1}/{retries}]: 大世界界面={int(overworld_ui_visible)}, c={int(c_btn)}, auto={int(auto_btn)}, auto_2={int(auto_2_btn)}"
             )
             if overworld_ui_visible:
                 log.info("事件页退出探测: 检测到大世界界面")
-                return "battle_entry"
+                self._save_event_exit_probe_snapshot(
+                    reason="overworld",
+                    attempt=attempt + 1,
+                    retries=retries,
+                    indicators=indicators,
+                )
+                return "overworld"
             if c_btn or auto_btn or auto_2_btn:
                 log.info("事件页退出探测: 检测到已入战 UI（c/auto/auto_2）")
+                self._save_event_exit_probe_snapshot(
+                    reason="battle_active",
+                    attempt=attempt + 1,
+                    retries=retries,
+                    indicators=indicators,
+                )
                 return "battle_active"
             followup_name = self._match_default_trigger_name(
                 bless_like_names + item_like_names
@@ -1057,9 +1236,33 @@ class DivergentUniverse(UniverseUtils):
             if followup_name:
                 if followup_name in bless_like_names:
                     log.info(f"事件页退出探测: 检测到祝福界面 {followup_name}")
+                    self._save_event_exit_probe_snapshot(
+                        reason="bless_ui",
+                        attempt=attempt + 1,
+                        retries=retries,
+                        indicators=indicators,
+                        followup_name=followup_name,
+                    )
                     return "bless_ui"
                 log.info(f"事件页退出探测: 检测到奇物/站点卡界面 {followup_name}")
+                self._save_event_exit_probe_snapshot(
+                    reason="item_ui",
+                    attempt=attempt + 1,
+                    retries=retries,
+                    indicators=indicators,
+                    followup_name=followup_name,
+                )
                 return "item_ui"
+            reason = "probing" if attempt < retries - 1 else "timeout"
+            self._save_event_exit_probe_snapshot(
+                reason=reason,
+                attempt=attempt + 1,
+                retries=retries,
+                indicators=indicators,
+                followup_name=followup_name,
+            )
+            if attempt == retries - 1:
+                return ""
             time.sleep(interval)
         return ""
 
@@ -1145,18 +1348,51 @@ class DivergentUniverse(UniverseUtils):
     def _ensure_all_door_template(self):
         if hasattr(self, "all_door_tpl"):
             return
-        tpl = cv.imread(img_path("divergent", "all_door.png"))
-        if tpl is None:
+
+        self._door_sift = cv.SIFT_create() if hasattr(cv, "SIFT_create") else None
+        self._door_sift_matcher = (
+            cv.FlannBasedMatcher(dict(algorithm=1, trees=5), dict(checks=50))
+            if self._door_sift is not None
+            else None
+        )
+        if self._door_sift is None:
+            log.error("当前 OpenCV 不支持 SIFT，无法使用 SIFT 找门")
+
+        templates = []
+        for template_name in ["all_door.png", "all_door_up.png", "all_door_down.png"]:
+            tpl = cv.imread(img_path("divergent", template_name))
+            if tpl is None:
+                log.warning(f"模板读取失败: divergent/{template_name}")
+                continue
+            tpl_hsv = cv.cvtColor(tpl, cv.COLOR_BGR2HSV)
+            tpl_pink, tpl_yellow, _, _ = self._make_door_color_masks(tpl_hsv)
+            tpl_gray = cv.cvtColor(tpl, cv.COLOR_BGR2GRAY)
+            sift_kp, sift_des = ([], None)
+            if self._door_sift is not None:
+                sift_kp, sift_des = self._door_sift.detectAndCompute(tpl_gray, None)
+            templates.append(
+                {
+                    "name": template_name,
+                    "image": tpl,
+                    "gray": tpl_gray,
+                    "edge": cv.Canny(tpl, 50, 150),
+                    "pink": tpl_pink,
+                    "yellow": tpl_yellow,
+                    "sift_kp": sift_kp,
+                    "sift_des": sift_des,
+                    "sift_threshold": {
+                        "all_door.png": 20,
+                        "all_door_up.png": 18,
+                        "all_door_down.png": 15,
+                    }[template_name],
+                }
+            )
+
+        if not templates:
             self.all_door_tpl = None
-            log.error("模板读取失败: divergent/all_door.png")
+            log.error("模板读取失败: divergent/all_door/all_door_up/all_door_down")
             return
-        tpl_hsv = cv.cvtColor(tpl, cv.COLOR_BGR2HSV)
-        tpl_pink, tpl_yellow, _, _ = self._make_door_color_masks(tpl_hsv)
-        self.all_door_tpl = {
-            "edge": cv.Canny(tpl, 50, 150),
-            "pink": tpl_pink,
-            "yellow": tpl_yellow,
-        }
+        self.all_door_tpl = templates
 
     def _enhance_mask_connectivity(self, mask_bin):
         # 与 door_template_debug 保持一致：闭开运算并过滤小连通域。
@@ -1210,7 +1446,9 @@ class DivergentUniverse(UniverseUtils):
         )
         return pink, yellow, glass_cyan_green, glass_highlight
 
-    def _match_all_door_fullscreen(self, screen_bgr):
+    def _match_all_door_fullscreen(
+        self, screen_bgr, origin_x=0, origin_y=0, distance_scales=None
+    ):
         self._ensure_all_door_template()
         if self.all_door_tpl is None:
             return None
@@ -1220,49 +1458,188 @@ class DivergentUniverse(UniverseUtils):
         roi_hsv = cv.cvtColor(screen_bgr, cv.COLOR_BGR2HSV)
         roi_pink, roi_yellow, _, _ = self._make_door_color_masks(roi_hsv)
 
-        tpl_edge = self.all_door_tpl["edge"]
-        tpl_pink = self.all_door_tpl["pink"]
-        tpl_yellow = self.all_door_tpl["yellow"]
-        th, tw = tpl_edge.shape[:2]
+        best = None
+        # 门在画面里的尺寸主要取决于角色和门的距离，而不是屏幕分辨率。
+        # 全窗口找门使用更宽的距离尺度；对齐 ROI 可传入较窄尺度以保持稳定。
+        if distance_scales is None:
+            distance_scales = [0.45, 0.55, 0.65, 0.75, 0.85, 1.0, 1.15, 1.3, 1.5, 1.7]
+        for tpl in self.all_door_tpl:
+            tpl_edge = tpl["edge"]
+            tpl_pink = tpl["pink"]
+            tpl_yellow = tpl["yellow"]
+            th, tw = tpl_edge.shape[:2]
+            for scale in distance_scales:
+                rw, rh = max(1, int(tw * scale)), max(1, int(th * scale))
+                if rw >= roi_w or rh >= roi_h:
+                    continue
+
+                scaled_edge = cv.resize(
+                    tpl_edge, (rw, rh), interpolation=cv.INTER_LINEAR
+                )
+                scaled_pink = cv.resize(
+                    tpl_pink, (rw, rh), interpolation=cv.INTER_NEAREST
+                )
+                scaled_yellow = cv.resize(
+                    tpl_yellow, (rw, rh), interpolation=cv.INTER_NEAREST
+                )
+
+                edge_map = cv.matchTemplate(roi_edge, scaled_edge, cv.TM_CCORR_NORMED)
+                pink_map = self._normalized_mask_overlap_map(roi_pink, scaled_pink)
+                yellow_map = self._normalized_mask_overlap_map(
+                    roi_yellow, scaled_yellow
+                )
+
+                frame_color_map = 0.70 * pink_map + 0.30 * yellow_map
+                # door_template_debug 专用打分比例：frame_color 70% + edge 30%
+                score_map = 0.70 * frame_color_map + 0.30 * edge_map
+
+                _, conf, _, max_loc = cv.minMaxLoc(score_map)
+                cx = origin_x + max_loc[0] + rw / 2
+                cy = origin_y + max_loc[1] + rh / 2
+                item = {
+                    "conf": float(conf),
+                    "template": tpl["name"],
+                    "scale": float(scale),
+                    "center_x": float(cx),
+                    "center_y": float(cy),
+                    "width": int(rw),
+                    "height": int(rh),
+                    "x": int(origin_x + max_loc[0]),
+                    "y": int(origin_y + max_loc[1]),
+                }
+                if best is None or item["conf"] > best["conf"]:
+                    best = item
+
+        return best
+
+    def _match_all_door_sift_fullscreen(self, screen_bgr):
+        self._ensure_all_door_template()
+        if (
+            self.all_door_tpl is None
+            or self._door_sift is None
+            or self._door_sift_matcher is None
+        ):
+            return None
+
+        screen_gray = cv.cvtColor(screen_bgr, cv.COLOR_BGR2GRAY)
+        kp_scr, des_scr = self._door_sift.detectAndCompute(screen_gray, None)
+        if des_scr is None or len(kp_scr) < 4:
+            return None
+        if des_scr.dtype != np.float32:
+            des_scr = des_scr.astype(np.float32)
 
         best = None
-        # 与 door_template_debug 保持一致，避免实机和离线评分偏移。
-        for scale in [0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3]:
-            rw, rh = max(1, int(tw * scale)), max(1, int(th * scale))
-            if rw >= roi_w or rh >= roi_h:
+        for tpl in self.all_door_tpl:
+            kp_tpl = tpl.get("sift_kp") or []
+            des_tpl = tpl.get("sift_des")
+            if des_tpl is None or len(kp_tpl) < 4:
+                continue
+            if des_tpl.dtype != np.float32:
+                des_tpl = des_tpl.astype(np.float32)
+
+            raw_matches = self._door_sift_matcher.knnMatch(des_tpl, des_scr, k=2)
+            good_matches = [
+                pair[0]
+                for pair in raw_matches
+                if len(pair) == 2 and pair[0].distance < 0.7 * pair[1].distance
+            ]
+            if len(good_matches) < 4:
+                item = {
+                    "template": tpl["name"],
+                    "matched": False,
+                    "inliers": 0,
+                    "inlier_ratio": 0.0,
+                    "good_matches": len(good_matches),
+                    "raw_matches": len(raw_matches),
+                    "threshold": tpl["sift_threshold"],
+                    "center_x": None,
+                    "center_y": None,
+                    "width": 0,
+                    "height": 0,
+                    "x": 0,
+                    "y": 0,
+                }
+                if best is None or item["good_matches"] > best["good_matches"]:
+                    best = item
                 continue
 
-            scaled_edge = cv.resize(tpl_edge, (rw, rh), interpolation=cv.INTER_LINEAR)
-            scaled_pink = cv.resize(tpl_pink, (rw, rh), interpolation=cv.INTER_NEAREST)
-            scaled_yellow = cv.resize(
-                tpl_yellow, (rw, rh), interpolation=cv.INTER_NEAREST
+            src_pts = np.float32([kp_tpl[m.queryIdx].pt for m in good_matches]).reshape(
+                -1, 1, 2
             )
+            dst_pts = np.float32([kp_scr[m.trainIdx].pt for m in good_matches]).reshape(
+                -1, 1, 2
+            )
+            matrix, mask = cv.findHomography(src_pts, dst_pts, cv.RANSAC, 5.0)
+            if matrix is None or mask is None:
+                inliers = 0
+                inlier_ratio = 0.0
+                projected = None
+            else:
+                inliers = int(mask.ravel().sum())
+                inlier_ratio = float(inliers / max(1, len(good_matches)))
+                h, w = tpl["image"].shape[:2]
+                corners = np.float32([[0, 0], [w, 0], [w, h], [0, h]]).reshape(
+                    -1, 1, 2
+                )
+                projected = cv.perspectiveTransform(corners, matrix).reshape(-1, 2)
 
-            edge_map = cv.matchTemplate(roi_edge, scaled_edge, cv.TM_CCORR_NORMED)
-            pink_map = self._normalized_mask_overlap_map(roi_pink, scaled_pink)
-            yellow_map = self._normalized_mask_overlap_map(roi_yellow, scaled_yellow)
+            threshold = tpl["sift_threshold"]
+            matched = inliers >= threshold and inlier_ratio >= 0.55
+            if projected is None:
+                center_x = center_y = None
+                x = y = width = height = 0
+                projected_corners = None
+            else:
+                center_x = float(projected[:, 0].mean())
+                center_y = float(projected[:, 1].mean())
+                min_xy = projected.min(axis=0)
+                max_xy = projected.max(axis=0)
+                x, y = int(min_xy[0]), int(min_xy[1])
+                width = int(max(0, max_xy[0] - min_xy[0]))
+                height = int(max(0, max_xy[1] - min_xy[1]))
+                projected_corners = [
+                    [float(px), float(py)] for px, py in projected.tolist()
+                ]
 
-            frame_color_map = 0.70 * pink_map + 0.30 * yellow_map
-            # door_template_debug 专用打分比例：frame_color 70% + edge 30%
-            score_map = 0.70 * frame_color_map + 0.30 * edge_map
-
-            _, conf, _, max_loc = cv.minMaxLoc(score_map)
-            cx = max_loc[0] + rw / 2
-            cy = max_loc[1] + rh / 2
             item = {
-                "conf": float(conf),
-                "scale": float(scale),
-                "center_x": float(cx),
-                "center_y": float(cy),
-                "width": int(rw),
-                "height": int(rh),
-                "x": int(max_loc[0]),
-                "y": int(max_loc[1]),
+                "template": tpl["name"],
+                "matched": matched,
+                "inliers": inliers,
+                "inlier_ratio": inlier_ratio,
+                "good_matches": len(good_matches),
+                "raw_matches": len(raw_matches),
+                "threshold": threshold,
+                "center_x": center_x,
+                "center_y": center_y,
+                "x": x,
+                "y": y,
+                "width": width,
+                "height": height,
+                "projected_corners": projected_corners,
             }
-            if best is None or item["conf"] > best["conf"]:
+            if best is None:
+                best = item
+                continue
+            best_key = (int(best["matched"]), best["inliers"], best["inlier_ratio"])
+            item_key = (int(item["matched"]), item["inliers"], item["inlier_ratio"])
+            if item_key > best_key:
                 best = item
 
         return best
+
+    def _door_align_roi_x_range(self):
+        w = self.screen.shape[1]
+        x1 = int(w * 900 / 1920)
+        x2 = int(w * 1030 / 1920)
+        return [max(0, x1), min(w, x2)]
+
+    def _door_match_in_align_roi(self, match, roi_x_range):
+        if match is None:
+            return False
+        if match.get("center_x") is None:
+            return False
+        x1, x2 = roi_x_range
+        return x1 <= match["center_x"] <= x2
 
     def _full_turn_align_scan(self, total_turn=360, step=12):
         turned = 0
@@ -1279,6 +1656,7 @@ class DivergentUniverse(UniverseUtils):
 
     # 新差分找门
     def align_to_door(self, timeout=120):
+        self._enable_view_movement("align_to_door")
         tm = time.time()
         round_count = 0  # 轮数计数器
         moves_this_round = 0  # 本轮左右移动计数
@@ -1287,12 +1665,20 @@ class DivergentUniverse(UniverseUtils):
             if self._stop:
                 return 0
             self.get_screen()
-            match = self._match_all_door_fullscreen(self.screen)
-            if match is None or match["conf"] < 0.6:
+            full_match = self._match_all_door_sift_fullscreen(self.screen)
+            if full_match is None or not full_match["matched"]:
                 self.mouse_move(25, axis="x")
                 moves_this_round += 1
+                best_tpl = full_match["template"] if full_match else "n/a"
+                inliers = full_match["inliers"] if full_match else 0
+                threshold = full_match["threshold"] if full_match else 0
+                good_matches = full_match["good_matches"] if full_match else 0
+                inlier_ratio = full_match["inlier_ratio"] if full_match else 0.0
                 log.info(
-                    f"[对门] 未命中 all_door 或低于阈值0.60，右移视角继续搜索 (本轮移动数: {moves_this_round})"
+                    f"[对门] SIFT门匹配不足，右移视角继续搜索 "
+                    f"(best={best_tpl} inliers={inliers}/{threshold} "
+                    f"good={good_matches} ratio={inlier_ratio:.3f}, "
+                    f"本轮移动数: {moves_this_round})"
                 )
                 time.sleep(0.5)
 
@@ -1310,18 +1696,21 @@ class DivergentUniverse(UniverseUtils):
 
                 continue
 
-            door_center_x = match["center_x"]
-            # 对齐窗口改为 x in [930, 1000]（按 1920 基准等比换算）。
-            target_left = int(self.screen.shape[1] * 930 / 1920)
-            target_right = int(self.screen.shape[1] * 1000 / 1920)
-            if target_left <= door_center_x <= target_right:
+            align_roi_x_range = self._door_align_roi_x_range()
+            if self._door_match_in_align_roi(full_match, align_roi_x_range):
                 log.info(
-                    f"门对准完成(all_door) conf={match['conf']:.3f} center_x={door_center_x:.1f} window=[{target_left},{target_right}]"
+                    f"门对准完成({full_match['template']} SIFT) "
+                    f"inliers={full_match['inliers']}/{full_match['threshold']} "
+                    f"good={full_match['good_matches']} "
+                    f"ratio={full_match['inlier_ratio']:.3f} "
+                    f"center=({full_match['center_x']:.1f},{full_match['center_y']:.1f}) "
+                    f"roi_x={align_roi_x_range}, roi_y=all"
                 )
                 return 1
 
+            door_center_x = full_match["center_x"]
             # 一次计算并水平转向到位；不做垂直移动。
-            target_center_x = (target_left + target_right) / 2
+            target_center_x = (align_roi_x_range[0] + align_roi_x_range[1]) / 2
             bias = door_center_x - target_center_x
             move_angle = int(round(bias / 16.0))
             if move_angle == 0:
@@ -1329,7 +1718,14 @@ class DivergentUniverse(UniverseUtils):
             self.mouse_move(move_angle, axis="x")
             moves_this_round += 1
             log.info(
-                f"[对门] 一次转向: conf={match['conf']:.3f}, bias={bias:+.1f}, move={move_angle:+d} (本轮移动数: {moves_this_round})"
+                f"[对门] 一次转向({full_match['template']} SIFT): "
+                f"inliers={full_match['inliers']}/{full_match['threshold']}, "
+                f"good={full_match['good_matches']}, "
+                f"ratio={full_match['inlier_ratio']:.3f}, "
+                f"center=({full_match['center_x']:.1f},{full_match['center_y']:.1f}), "
+                f"roi_x={align_roi_x_range}, roi_y=all, "
+                f"bias={bias:+.1f}, move={move_angle:+d} "
+                f"(本轮移动数: {moves_this_round})"
             )
             # 每次转向后等待0.5s，再进行下一次检测。
             time.sleep(0.5)
@@ -1378,17 +1774,30 @@ class DivergentUniverse(UniverseUtils):
                     continue
             else:
                 overworld_ui_missing_since = None
-            if self.check_f(
+            f_result = self.check_f(
                 is_in=["随意门"],
                 ocr_box=[1207, 1530, 585, 640],
                 debug_save=True,
                 debug_tag="door_move_forward",
-            ):
+            )
+            if f_result:
                 log.info("识别到门交互F文案：随意门")
                 keyops.keyUp("w")
                 self.press("f")
                 time.sleep(0.3)
                 return 1
+            if f_result == 0:
+                f_text = str(getattr(self, "_last_check_f_cleaned_text", "") or "")
+                if any(keyword in f_text for keyword in ["沉浸", "紧锁", "复活", "下载"]):
+                    log.info(
+                        f"门前前进检测: 识别到禁用交互“{f_text}”，松开W并重新对门"
+                    )
+                    keyops.keyUp("w")
+                    self.press("s", 0.25)
+                    self.align_to_door(timeout=3)
+                    keyops.keyDown("w")
+                    overworld_ui_missing_since = None
+                    continue
             time.sleep(0.08)
         keyops.keyUp("w")
         return 0
@@ -1624,7 +2033,7 @@ class DivergentUniverse(UniverseUtils):
                             ocr_text=merged_text,
                             keywords=["事件候选为空"],
                             matched=False,
-                            debug_tag="scan_event_positions_empty",
+                            debug_tag="anomaly_scan_positions_empty",
                         )
                         self._update_last_check_debug_json(
                             {
@@ -1649,7 +2058,7 @@ class DivergentUniverse(UniverseUtils):
                     is_in=["随意门", "事件"],
                     ocr_box=[1207, 1530, 585, 640],
                     debug_save=True,
-                    debug_tag="scan_event_positions",
+                    debug_tag="anomaly_scan_positions",
                 ):
                     f_text = self.clean_text(
                         self.ts.ocr_one_row(self.screen, [1207, 1530, 585, 640]),
@@ -1664,7 +2073,7 @@ class DivergentUniverse(UniverseUtils):
                         keyops.keyDown("w")
                         continue
 
-                    if any(keyword in f_text for keyword in ("事件")):
+                    if "事件" in f_text:
                         log.info(
                             f"[当前区域] F 模板命中事件类文案，返回事件处理流程: {f_text}"
                         )
@@ -1715,6 +2124,74 @@ class DivergentUniverse(UniverseUtils):
             filtered.append((x, y))
         return filtered
 
+    def _set_area_event_count(self, total_events):
+        count = max(1, len(total_events))
+        if count > 3:
+            log.warning(
+                f"[当前区域] 检测到 {count} 个事件目标，仅按前三个处理: {total_events}"
+            )
+            count = 3
+        self._area_event_count = count
+        self._area_event_layout = ""
+        self._area_event_front_x = None
+        self._area_event_back_right_x = None
+        if count >= 3:
+            candidates = sorted(total_events, key=lambda pos: pos[0])[:3]
+            by_y = sorted(candidates, key=lambda pos: pos[1], reverse=True)
+            if len(by_y) >= 2 and by_y[0][1] - by_y[1][1] >= 15:
+                front_event = by_y[0]
+            else:
+                front_event = min(candidates, key=lambda pos: abs(pos[0] - 950))
+            back_events = [pos for pos in candidates if pos != front_event]
+            if len(back_events) < 2:
+                back_events = [pos for pos in candidates if pos is not front_event]
+            back_right = max(back_events, key=lambda pos: pos[0])
+            self._area_event_layout = "pin_three"
+            self._area_event_front_x = front_event[0]
+            self._area_event_back_right_x = back_right[0]
+            log.info(
+                f"[当前区域] 三事件品字形: 前中={front_event}, 后右={back_right}, 全部={candidates}"
+            )
+        log.info(f"[当前区域] 本区域事件目标数: {self._area_event_count}")
+        return count
+
+    def _first_area_event_x(self, total_events):
+        if getattr(self, "_area_event_layout", "") == "pin_three":
+            return self._area_event_front_x
+        return total_events[-1][0]
+
+    def _advance_to_next_area_event(self):
+        target_count = max(2, getattr(self, "_area_event_count", 2))
+        log.info(f"[当前区域] 继续处理事件目标 {self.area_state + 1}/{target_count}")
+        if (
+            getattr(self, "_area_event_layout", "") == "pin_three"
+            and self.area_state == 1
+            and self._area_event_back_right_x is not None
+        ):
+            log.info(
+                f"[当前区域] 三事件前中已处理，转向后右事件: {self._area_event_back_right_x}"
+            )
+            self.align_event("d", event_text=self._area_event_back_right_x, click=1)
+            self.area_state += 1
+            return
+        if hasattr(self, "keys"):
+            self.keys.fff = 1
+        self.press("a", 1.3)
+        time.sleep(0.4)
+        if hasattr(self, "keys"):
+            self.keys.fff = 0
+        self.get_screen()
+        if self.get_now_area() is not None:
+            self.press("w", 0.3)
+            time.sleep(0.6)
+            self.get_screen()
+            if self.check_f(check_text=0):
+                self.press("f")
+            else:
+                self.press("s", 0.5)
+                self.align_event("d")
+        self.area_state += 1
+
     def event_score(self, text, event):
         score = 0
         event_weight = [2 * self.speed, 1, -10]
@@ -1743,7 +2220,7 @@ class DivergentUniverse(UniverseUtils):
                 log.info(f"event:{event_id},start:{start}")
             if "事件" not in self.merge_text(self.ts.find_with_box([92, 195, 54, 88])):
                 time.sleep(0.4)
-                post_action = self.run_static()
+                post_action = self._run_event_post_static()
                 if post_action:
                     log.info(f"事件处理退出前的默认检测命中: {post_action}")
                 self._event_followup = self._probe_event_followup()
@@ -1909,7 +2386,7 @@ class DivergentUniverse(UniverseUtils):
                         log.error(
                             f"事件选择失败：未识别到可确认选项, event_id={event_id}, now_event={self.now_event}, title={title_text}"
                         )
-                    post_action = self.run_static()
+                    post_action = self._run_event_post_static()
                     if post_action:
                         log.info(f"事件选择失败后的默认检测命中: {post_action}")
                     self._event_followup = self._probe_event_followup()
@@ -1934,7 +2411,7 @@ class DivergentUniverse(UniverseUtils):
                     if "事件" not in self.merge_text(
                         self.ts.find_with_box([92, 195, 54, 88])
                     ):
-                        post_action = self.run_static()
+                        post_action = self._run_event_post_static()
                         if post_action:
                             log.info(f"事件处理被中断前的默认检测命中: {post_action}")
                         self._event_followup = self._probe_event_followup()
@@ -1954,7 +2431,7 @@ class DivergentUniverse(UniverseUtils):
         log.error(
             f"事件处理超时：20秒内未完成, event_id={event_id}, now_event={self.now_event}"
         )
-        post_action = self.run_static()
+        post_action = self._run_event_post_static()
         if post_action:
             log.info(f"事件处理超时后的默认检测命中: {post_action}")
         self._event_followup = self._probe_event_followup()
@@ -2036,6 +2513,9 @@ class DivergentUniverse(UniverseUtils):
                     visible_texts.append(raw_text)
                 if "首领" in raw_text or "首领" in cleaned_text:
                     candidates["首领"] = item
+                    continue
+                if "休整" in raw_text or "休整" in cleaned_text:
+                    candidates["休整"] = item
                     continue
                 for area_type in priority:
                     if area_type in raw_text or area_type in cleaned_text:
@@ -2168,6 +2648,18 @@ class DivergentUniverse(UniverseUtils):
             self.click_box(candidates["首领"]["box"])
             time.sleep(0.2)
             self.click_position([958, 965])
+            return 1
+
+        # 休整站点是必进项，通常不会和其他站点同时出现；识别到后不参与重抽。
+        if "休整" in candidates:
+            log.info("选择下一站：识别到休整，直接进入")
+            if self.debug:
+                self._save_next_debug_snapshot(
+                    "next_rest", rois, scan_debug, candidates, priority, visible_texts
+                )
+            self.click_box(candidates["休整"]["box"])
+            time.sleep(0.2)
+            self.click_img("divergent/confirm.png")
             return 1
 
         visible = self._list_visible_next_by_priority(candidates, priority)
@@ -2388,7 +2880,7 @@ class DivergentUniverse(UniverseUtils):
     def align_event(self, key, deep=0, event_text=None, click=0):
         find = 0
         found_by_find_event_text = False
-        if deep == 0 and key == "d" and (event_text is None or event_text != 950):
+        if deep == 0 and key == "d" and event_text is None:
             event_text = self.find_event_text(1)
             if not event_text:
                 self.press("s", 1)
@@ -2502,12 +2994,17 @@ class DivergentUniverse(UniverseUtils):
         if self.area_state == -1:
             self.close_and_exit(click=False)
             return 1
-        now_floor = self.floor
-        for i in range(1, 14):
-            if f"{i}13" in self.area_text:
-                now_floor = i
+        now_floor = self.area_floor if self.area_floor is not None else self.floor
+        if self.area_floor is None:
+            total = getattr(self, "floor_total", 13)
+            for i in range(1, total + 1):
+                if f"{i}{total}" in self.area_text:
+                    now_floor = i
         if now_floor != self.floor:
             if now_floor < self.floor:
+                log.warning(
+                    f"层数OCR回退: current={self.floor}, parsed={now_floor}, source={self.area_floor_source}, raw='{self.area_raw_text}', clean='{self.area_text}'"
+                )
                 self.init_floor()
             self.floor = now_floor
             if self.floor in [5, 10]:
@@ -2605,19 +3102,19 @@ class DivergentUniverse(UniverseUtils):
             f"floor:{self.floor}, state:{self.area_state}, area:{area_now}, text:{self.area_text}"
         )
 
-        if area_now in ["事件", "异常"]:
+        if area_now in ["异常"]:
             log.info(
                 f"[area_now] Detected area: {area_now}, area_state: {self.area_state}"
             )
-            # 事件/异常层：先找事件；找不到事件时，再用 F + 文案复核是否为随意门。
+            # 异常层：先找事件；找不到事件时，再用 F + 文案复核是否为随意门。
             if self.area_state == 0:
                 pyautogui.click()
                 self.check_pop()
                 time.sleep(0.4)
 
+                handled_anomaly_event = False
                 while not self._stop:
                     total_events = self._scan_event_positions()
-                    event_found_by_find_event_text = False
                     if total_events == "door":
                         log.info(
                             "[当前区域] 已识别随意门并进入门交互流程，结束本轮事件扫描。"
@@ -2625,17 +3122,31 @@ class DivergentUniverse(UniverseUtils):
                         return 1
                     if total_events == "event":
                         log.info("[当前区域] 扫描到事件类F文案，继续事件对齐流程。")
-                        event_found_by_find_event_text = self.align_event("d", click=1)
+                        handled_anomaly_event = True
+                        self.align_event("d", click=1)
                     elif not total_events:
-                        log.info("[当前区域] 未识别到更多事件，开始找门流程。")
-                        self.area_state = 1
-                        break
+                        if handled_anomaly_event:
+                            log.info("[当前区域] 异常事件已处理完，开始找门流程。")
+                            self.area_state = 1
+                            break
+                        log.info("[当前区域] 异常未识别到事件，按战斗异常处理。")
+                        if self.handle_battle_area():
+                            self.area_state = 1
+                            return 1
+                        else:
+                            self.close_and_exit(click=self.fail_count > 1)
+                            self.fail_count += 1
+                            return 1
                     else:
+                        self._set_area_event_count(total_events)
                         log.info(
-                            f"[当前区域] 识别到 {len(total_events)} 个事件: {total_events}"
+                            f"[当前区域] 异常识别到 {len(total_events)} 个事件: {total_events}"
                         )
-                        event_found_by_find_event_text = self.align_event(
-                            "d", event_text=total_events[-1][0], click=1
+                        handled_anomaly_event = True
+                        self.align_event(
+                            "d",
+                            event_text=self._first_area_event_x(total_events),
+                            click=1,
                         )
                     time.sleep(1)
 
@@ -2657,64 +3168,38 @@ class DivergentUniverse(UniverseUtils):
                         event_res = self.run_static(action_list=["事件选择"])
                         if event_res:
                             log.info(f"[当前区域] 已执行事件动作: {event_res}")
-                            followup = self._event_followup
-                            if followup in [
-                                "battle_entry",
-                                "battle_active",
-                            ]:
-                                log.info(
-                                    "[当前区域] 事件页退出后已进入战斗，交给外层轮询处理"
-                                )
-                                if event_found_by_find_event_text:
-                                    self.area_state = 2
-                                return 1
-                            elif followup in ["bless_ui", "item_ui"]:
-                                log.info(
-                                    f"[当前区域] 事件页退出后进入后续界面: {followup}"
-                                )
-                                if event_found_by_find_event_text:
-                                    self.area_state = 2
-                                return 1
-                            if event_found_by_find_event_text:
-                                log.info(
-                                    "[当前区域] 事件已由 find_event_text 定位并处理，结束当前区域扫描，进入 portal_opening_days。"
-                                )
-                                self.area_state = 2
-                                break
                         else:
                             log.warning("[当前区域] 未触发事件动作，直接执行事件处理。")
                             self.event()
-                            followup = self._event_followup
-                            if followup in [
-                                "battle_entry",
-                                "battle_active",
-                            ]:
-                                log.info(
-                                    "[当前区域] 事件页退出后已进入战斗，交给外层轮询处理"
-                                )
-                                if event_found_by_find_event_text:
-                                    self.area_state = 2
-                                return 1
-                            elif followup in ["bless_ui", "item_ui"]:
-                                log.info(
-                                    f"[当前区域] 事件页退出后进入后续界面: {followup}"
-                                )
-                                if event_found_by_find_event_text:
-                                    self.area_state = 2
-                                return 1
-                            if event_found_by_find_event_text:
-                                log.info(
-                                    "[当前区域] 事件已由 find_event_text 定位并处理，结束当前区域扫描，进入 portal_opening_days。"
-                                )
-                                self.area_state = 2
-                                break
+
+                        followup = self._event_followup
+                        self.area_state = 1
+                        if followup == "battle_active":
+                            log.info(
+                                "[当前区域] 事件页退出后已进入战斗，交给外层轮询处理；战斗后进入找门流程"
+                            )
+                            return 1
+                        if followup in ["bless_ui", "item_ui"]:
+                            log.info(
+                                f"[当前区域] 事件页退出后进入后续界面: {followup}；处理后进入找门流程"
+                            )
+                            return 1
+                        if followup == "overworld":
+                            log.info(
+                                "[当前区域] 事件页退出后回到大世界，进入找门流程。"
+                            )
+                        elif followup:
+                            log.info(
+                                f"[当前区域] 事件页退出后续状态: {followup}，进入找门流程。"
+                            )
+                        else:
+                            log.info("[当前区域] 事件已处理，进入找门流程。")
+                        break
                     else:
                         log.info(
                             f"[当前区域] 当前文本不是事件页，继续扫描: {detected_text}"
                         )
                         continue
-
-                    log.info("[当前区域] 事件已处理，继续查找下一个事件。")
 
             self.portal_opening_days(static=1)
 
@@ -2730,20 +3215,18 @@ class DivergentUniverse(UniverseUtils):
             self.portal_opening_days(static=1)
 
         elif area_now in ["商店"]:
-            self.press("w", 2)
+            self.press("w", 3)
             self.portal_opening_days(static=1)
 
-        elif area_now in ["奖励"]:
+        elif area_now in ["事件", "奖励", "遭遇"]:
             # 如果存在大黑塔,还是切过来,毕竟这些事件都可能入战
             if self.da_hei_ta and self.allow_e and not self.da_hei_ta_effecting:
                 self.skill()
                 self.da_hei_ta_effecting = True
 
-            # 这些层都可能存在单或者双的情况,同时还可能存在宝箱,抽奖机,后面再考虑
-            # 单的情况,事件在最中间,双的情况,分为两边,而且事件距离人物的距离也不一致
-            # 基本思想是前进,监视中间区域出现汉字,确定事件数量,分为单和双逻辑进行寻路
-            # 如果是单事件，则持续前进并寻找交互提示
-            # 如果是双事件,优先右侧事件,然后再左侧事件
+            # 这些层都可能存在单、双或三事件，同时还可能存在宝箱、抽奖机。
+            # 单事件在中间；双事件位置不变，按旧逻辑右后->左后；三事件是品字形，先前中再后右后左。
+            # 基本思想是前进,监视中间区域出现汉字,确定事件数量,再按事件数推进状态。
 
             if self.area_state == 0:
                 keyops.keyDown("w")
@@ -2785,7 +3268,7 @@ class DivergentUniverse(UniverseUtils):
                     total_events_after = self._filter_event_positions(
                         self.get_text_position(1)
                     )
-                    if len(total_events_after) <= 2 and len(total_events_after) >= len(
+                    if len(total_events_after) <= 3 and len(total_events_after) >= len(
                         total_events
                     ):
                         total_events = total_events_after
@@ -2802,35 +3285,24 @@ class DivergentUniverse(UniverseUtils):
 
                 if not total_events:
                     total_events = [(950, 0)]
+                event_count = self._set_area_event_count(total_events)
 
                 portal = self.find_portal()
                 log.info(f"portal_detail: {portal['nums']}")
                 log.info(f"area_state_update: {self.area_state}")
 
                 if portal["nums"] > 0:
-                    self.area_state = 2
+                    self.area_state = max(2, event_count)
                 else:
                     log.info("对齐中...")
-                    self.align_event("d", event_text=total_events[-1][0], click=1)
-                    self.area_state += 1 + (len(total_events) == 1)
+                    self.align_event(
+                        "d", event_text=self._first_area_event_x(total_events), click=1
+                    )
+                    self.area_state += 1 + (event_count == 1)
                     log.info(f"对齐完成, area_state: {self.area_state}")
 
-            elif self.area_state == 1:
-                self.keys.fff = 1
-                self.press("a", 1.3)
-                time.sleep(0.4)
-                self.keys.fff = 0
-                self.get_screen()
-                if self.get_now_area() is not None:
-                    self.press("w", 0.3)
-                    time.sleep(0.6)
-                    self.get_screen()
-                    if self.check_f(check_text=0):
-                        self.press("f")
-                    else:
-                        self.press("s", 0.5)
-                        self.align_event("d")
-                self.area_state += 1
+            elif self.area_state < max(2, getattr(self, "_area_event_count", 2)):
+                self._advance_to_next_area_event()
 
             else:
                 self.portal_opening_days(static=1)
@@ -2851,9 +3323,11 @@ class DivergentUniverse(UniverseUtils):
             self.check_pop()
             time.sleep(0.3)
             keyops.keyDown("w")
-            self.press("a", 0.45)
-            time.sleep(1.5)
-            keyops.keyUp("w")
+            try:
+                self.press("a", 0.45)
+                time.sleep(1.5)
+            finally:
+                keyops.keyUp("w")
             time.sleep(0.25)
             self.portal_opening_days(static=1)
 
@@ -2998,7 +3472,7 @@ class DivergentUniverse(UniverseUtils):
     def will_full(self):
         self.get_screen()
         if not self.click_img("new"):
-            self.click((0.5, 0.5))
+            self.click((0.588, 0.5))
         time.sleep(0.2)
         # 点击后强制刷新，避免在旧帧上继续执行后续确认。
         self.get_screen()
@@ -3030,13 +3504,18 @@ class DivergentUniverse(UniverseUtils):
         self.get_screen()
         target = cv.imread(img_path("divergent", "1.png"))
         if target is None:
-            log.warning("未找到模板图片 imgs/divergent/1.png")
-            return 0
+            log.warning("未找到模板图片 imgs/divergent/1.png，直接点击确定")
+            self.click_position([1629, 936])
+            time.sleep(0.3)
+            return 1
 
         result = cv.matchTemplate(self.screen, target, cv.TM_CCORR_NORMED)
         ys, xs = np.where(result >= 0.95)
         if len(xs) == 0:
-            return 0
+            log.info("选择站点卡未匹配到 1.png，直接点击确定")
+            self.click_position([1629, 936])
+            time.sleep(0.3)
+            return 1
 
         # 选择第一个匹配点（从上到下、从左到右）
         y, x = sorted(zip(ys.tolist(), xs.tolist()), key=lambda p: (p[0], p[1]))[0]
@@ -3163,12 +3642,33 @@ class DivergentUniverse(UniverseUtils):
         self.count_tm = time.time()
 
     def stop(self, *_, **__):
+        stop_lock = getattr(self, "_stop_lock", None)
+        if stop_lock is None:
+            if self._stop:
+                log.info("停止请求已在处理中，跳过重复停止")
+                return
+            self._stop = True
+        else:
+            with stop_lock:
+                if self._stop:
+                    log.info("停止请求已在处理中，跳过重复停止")
+                    return
+                self._stop = True
         log.info("尝试停止运行")
         try:
-            self.init_floor()
+            self.portal_cnt = 0
+            self.area_state = 0
+            self.event_solved = 0
+            self.bless_solved = 0
+            self.fail_cnt = 0
+            self.now_event = ""
+            self._event_followup = ""
+            if hasattr(self, "keys"):
+                self.keys.fff = 0
+                self.keys.events.clear()
+            self._release_control_keys(label="stop")
         except:
             pass
-        self._stop = True
 
     def on_key_press(self, event):
         if event.name == "f8":
@@ -3176,7 +3676,9 @@ class DivergentUniverse(UniverseUtils):
             self.stop()
 
     def start(self):
-        self._stop = False
+        with self._stop_lock:
+            self._stop = False
+        self._enable_view_movement("DivergentUniverse.start")
         log.info(describe_runtime_context("DivergentUniverse.start"))
         keyboard.on_press(self.on_key_press)
         self.keys = KeyController(self)
@@ -3202,7 +3704,9 @@ class DivergentUniverse(UniverseUtils):
             self.stop()
 
     def start_door_test(self):
-        self._stop = False
+        with self._stop_lock:
+            self._stop = False
+        self._enable_view_movement("DivergentUniverse.start_door_test")
         keyboard.on_press(self.on_key_press)
         self.keys = KeyController(self)
         try:

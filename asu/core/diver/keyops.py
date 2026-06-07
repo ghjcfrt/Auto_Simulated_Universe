@@ -8,12 +8,12 @@ def get_mapping(x):
         x = config.mapping[config.origin_key.index(x)]
     return x
 
-def keyDown(x):
-    pyautogui.keyDown(get_mapping(x))
-def keyUp(x):
+def keyDown(x, pause=True):
+    pyautogui.keyDown(get_mapping(x), _pause=pause)
+def keyUp(x, pause=True):
     if config.long_press_sprint and x=='w':
-        pyautogui.keyUp(get_mapping('shift'))
-    pyautogui.keyUp(get_mapping(x))
+        pyautogui.keyUp(get_mapping('shift'), _pause=pause)
+    pyautogui.keyUp(get_mapping(x), _pause=pause)
 
 class KeyController:
     def __init__(self, father):

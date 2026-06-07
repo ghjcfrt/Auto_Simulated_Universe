@@ -289,6 +289,20 @@ class UniverseUtils:
             return str(jpg_path)
         return img_path(f"{path}.png")
 
+    def _check_debug_dir_name(self, debug_tag=None, default="check_debug"):
+        tag = str(debug_tag or "")
+        if tag in {"door_move_forward", "portal_opening_days"}:
+            return "door_debug"
+        if tag.startswith("anomaly_scan_positions") or tag.startswith(
+            "scan_event_positions"
+        ):
+            return "anomaly_scan_debug"
+        if tag.startswith("find_event_text"):
+            return "event_text_debug"
+        if tag.startswith("check_f"):
+            return "check_f_debug"
+        return default
+
     def _save_check_debug_images(
         self,
         raw_screen,
@@ -302,16 +316,19 @@ class UniverseUtils:
         center=None,
         mask=None,
         large=True,
+        save_dir_name=None,
     ):
-        debug_dir = Path(logs_path("check_debug"))
+        save_dir_name = save_dir_name or self._check_debug_dir_name(debug_tag)
+        debug_dir = Path(logs_path(save_dir_name))
         debug_dir.mkdir(parents=True, exist_ok=True)
-        if not hasattr(self, "_check_debug_idx"):
-            self._check_debug_idx = 0
-        self._check_debug_idx += 1
+        idx_attr = f"_{save_dir_name}_idx"
+        if not hasattr(self, idx_attr):
+            setattr(self, idx_attr, 0)
+        setattr(self, idx_attr, getattr(self, idx_attr) + 1)
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         template_name = Path(path).stem
-        prefix = f"{ts}_{self._check_debug_idx:04d}_{debug_tag}_{template_name}"
+        prefix = f"{ts}_{getattr(self, idx_attr):04d}_{debug_tag}_{template_name}"
 
         raw_file = debug_dir / f"{prefix}_raw.png"
         if raw_screen is not None:
@@ -375,9 +392,10 @@ class UniverseUtils:
         keywords,
         matched,
         debug_tag="check_f_text",
-        save_dir_name="check_debug",
+        save_dir_name=None,
         extra_data=None,
     ):
+        save_dir_name = save_dir_name or self._check_debug_dir_name(debug_tag)
         debug_dir = Path(logs_path(save_dir_name))
         debug_dir.mkdir(parents=True, exist_ok=True)
         idx_attr = f"_{save_dir_name}_idx"
@@ -938,7 +956,7 @@ class UniverseUtils:
             f"[check_f] 开始{template_mode}检查: 模板ROI=({fx1},{fx2},{fy1},{fy2}), 文案ROI={tuple(ocr_box) if check_text else '关闭'}, 关键词={keywords}"
         )
 
-        threshold = 0.9
+        threshold = 0.8
         if config.mapping[0] != "f":
             target = self.gen_hotkey_img(
                 config.mapping[0], size=(target.shape[1], target.shape[0])
@@ -963,6 +981,9 @@ class UniverseUtils:
         self.ty = (fy1 + max_loc[1] + target.shape[0] / 2) / self.yy
 
         template_matched = max_val >= threshold
+        self._last_check_f_template_matched = template_matched
+        self._last_check_f_raw_text = ""
+        self._last_check_f_cleaned_text = ""
         log.info(
             f"[check_f] 模板匹配: 模板={Path(target_path).name}, 目标尺寸={target.shape[1]}x{target.shape[0]}, ROI尺寸={local_screen.shape[1]}x{local_screen.shape[0]}, score={max_val:.4f}, threshold={threshold:.4f}, matched={int(template_matched)}"
         )
@@ -997,6 +1018,8 @@ class UniverseUtils:
 
         text = str(self.ts.ocr_one_row(self.screen, ocr_box) or "")
         cleaned_text = self.clean_text(text, char=0)
+        self._last_check_f_raw_text = text
+        self._last_check_f_cleaned_text = cleaned_text
         keyword_hit = any(keyword in cleaned_text for keyword in keywords)
         log.info(
             f"[check_f] 文案OCR: ROI={tuple(ocr_box)}, 原文={text!r}, 清洗后={cleaned_text!r}, 关键词={keywords}, 命中={int(keyword_hit)}"

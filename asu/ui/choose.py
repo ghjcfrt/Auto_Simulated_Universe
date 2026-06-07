@@ -103,17 +103,13 @@ def choose_view(page: Page):
             win32gui.SetForegroundWindow(guind)
         except:
             pass
-        if page.su is not None:
+        if page.su is not None and not getattr(page.su, "_stop", True):
             run(page.su.stop)
         notif("已退出自动化", txt)
 
     def stops(_e):
         show_snack_bar(page, "停止运行（>∀<）", ft.colors.GREEN)
-        try:
-            page.su._stop = 1
-        except:
-            pass
-        if page.su is not None:
+        if page.su is not None and not getattr(page.su, "_stop", True):
             run(page.su.stop)
 
     def update_maps(_e):
@@ -151,7 +147,7 @@ def choose_view(page: Page):
 
         run(page.su.screen_test)
         txt = " "
-        if page.su is not None:
+        if page.su is not None and not getattr(page.su, "_stop", True):
             run(page.su.stop)
         notif("已完成截图测试", txt)
 

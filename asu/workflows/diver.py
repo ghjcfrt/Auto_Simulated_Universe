@@ -535,6 +535,18 @@ class DivergentUniverse(UniverseUtils):
             self.floor_total = total
         return self.area_raw_text, self.area_text
 
+    def _is_final_floor(self):
+        total = getattr(self, "floor_total", 13)
+        current = getattr(self, "area_floor", None)
+        if current is None:
+            current = getattr(self, "floor", 0)
+        try:
+            total = int(total)
+            current = int(current)
+        except (TypeError, ValueError):
+            return False
+        return total > 0 and current == total
+
     def init_floor(self):
         self.portal_cnt = 0
         self.area_state = 0
@@ -598,7 +610,7 @@ class DivergentUniverse(UniverseUtils):
         log.info(describe_runtime_context(f"close_and_exit(click={click})"))
         self._prepare_close_and_exit_input()
         self.press("esc", 1.0)
-        if self.debug and self.floor < 13:
+        if self.debug and not self._is_final_floor():
             with open("test.txt", "a") as f:
                 format_string = "%H:%M:%S"
                 formatted_time = time.strftime(format_string, time.localtime())
@@ -1786,18 +1798,6 @@ class DivergentUniverse(UniverseUtils):
                 self.press("f")
                 time.sleep(0.3)
                 return 1
-            if f_result == 0:
-                f_text = str(getattr(self, "_last_check_f_cleaned_text", "") or "")
-                if any(keyword in f_text for keyword in ["沉浸", "紧锁", "复活", "下载"]):
-                    log.info(
-                        f"门前前进检测: 识别到禁用交互“{f_text}”，松开W并重新对门"
-                    )
-                    keyops.keyUp("w")
-                    self.press("s", 0.25)
-                    self.align_to_door(timeout=3)
-                    keyops.keyDown("w")
-                    overworld_ui_missing_since = None
-                    continue
             time.sleep(0.08)
         keyops.keyUp("w")
         return 0
@@ -3343,7 +3343,8 @@ class DivergentUniverse(UniverseUtils):
         #     self.portal_opening_days(static=1)
 
         elif area_now in ["首领"]:
-            if self.floor == 13 and self.area_state > 0:
+            is_final_boss_floor = self._is_final_floor()
+            if is_final_boss_floor and self.area_state > 0:
                 # 已经结束战斗了
                 self.close_and_exit()
                 self.end_of_uni()
@@ -3367,6 +3368,9 @@ class DivergentUniverse(UniverseUtils):
                 pyautogui.click()
                 time.sleep(0.2)
                 pyautogui.click()
+                if is_final_boss_floor:
+                    self.area_state += 1
+                    return 1
                 if not self.handle_battle_area(enter_timeout=22):
                     self.close_and_exit(click=self.fail_count > 1)
                     self.fail_count += 1
